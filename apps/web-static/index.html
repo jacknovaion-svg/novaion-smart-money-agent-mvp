@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NOVAION Smart Money Agent</title>
+    <style>
+      :root {
+        color: #17211f;
+        background: #f6f8f7;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      button, input, select, textarea { font: inherit; }
+      button { cursor: pointer; }
+      .shell { min-height: 100vh; display: grid; grid-template-columns: 250px 1fr; }
+      .sidebar { background: #17211f; color: white; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+      .brand { display: flex; gap: 12px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,.14); }
+      .mark { width: 38px; height: 38px; border-radius: 8px; background: #d95f48; display: grid; place-items: center; font-weight: 900; }
+      .brand span { display: block; color: #b8c7c1; font-size: 12px; }
+      .nav { display: grid; gap: 8px; }
+      .nav button, .logout { border: 1px solid transparent; background: transparent; color: #dce6e2; min-height: 42px; border-radius: 6px; text-align: left; padding: 0 12px; }
+      .nav button.active, .nav button:hover, .logout:hover { background: rgba(255,255,255,.1); color: white; }
+      .logout { margin-top: auto; }
+      main { padding: 28px; display: grid; gap: 20px; align-content: start; }
+      h1, h2 { margin: 0; letter-spacing: 0; }
+      h1 { font-size: 32px; }
+      h2 { font-size: 19px; }
+      .eyebrow { margin: 0 0 8px; color: #116149; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+      .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+      .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+      .card, .panel, .login { background: white; border: 1px solid #dce6e2; border-radius: 8px; }
+      .card { padding: 18px; }
+      .card span { display: block; color: #65726e; font-size: 13px; font-weight: 700; }
+      .card strong { display: block; margin-top: 10px; font-size: 28px; }
+      .panel { overflow-x: auto; }
+      .section { display: grid; gap: 14px; }
+      .section-title { display: flex; justify-content: space-between; align-items: end; gap: 12px; }
+      .section-title span { color: #65726e; font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 12px 14px; border-bottom: 1px solid #edf2f0; text-align: left; white-space: nowrap; font-size: 14px; }
+      th { font-size: 12px; color: #65726e; text-transform: uppercase; }
+      label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; color: #34413d; }
+      input, select, textarea { width: 100%; border: 1px solid #cbd8d3; border-radius: 6px; padding: 10px 12px; }
+      textarea { min-height: 76px; resize: vertical; }
+      .form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 18px; }
+      .wide { grid-column: 1 / -1; }
+      .btn, .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 6px; min-height: 38px; padding: 0 14px; font-weight: 800; border: 1px solid transparent; }
+      .btn { background: #116149; color: white; }
+      .ghost { background: white; color: #17211f; border-color: #cbd8d3; }
+      .row-actions { display: flex; gap: 8px; }
+      .pill { display: inline-flex; min-height: 24px; align-items: center; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 800; background: #eef4f1; }
+      .active, .info, .new { color: #116149; background: #e4f4ed; }
+      .disabled, .warning, .read { color: #8a5a00; background: #fff5df; }
+      .ignored, .error { color: #842415; background: #fff0ed; }
+      .positive { color: #116149; font-weight: 800; }
+      .negative { color: #d95f48; font-weight: 800; }
+      .risk { display: flex; gap: 10px; padding: 14px 16px; border-radius: 8px; border: 1px solid #f0c4bc; background: #fff0ed; color: #842415; font-weight: 700; }
+      .login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #eef4f1; }
+      .login { width: min(460px, 100%); padding: 32px; display: grid; gap: 22px; }
+      .login form { display: grid; gap: 16px; }
+      .error { padding: 12px 14px; border-radius: 6px; border: 1px solid #f0c4bc; background: #fff0ed; color: #842415; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+      @media (max-width: 900px) {
+        .shell, .grid, .form { grid-template-columns: 1fr; }
+        .header, .section-title { align-items: start; flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const API = params.get("api") || "http://127.0.0.1:8010";
+      localStorage.setItem("novaion_api_url", API);
+      let token = localStorage.getItem("novaion_token") || "";
+      let page = "dashboard";
+      let selectedWallet = null;
+      let state = { summary: null, paper: null, wallets: [], metrics: [], signals: [], trades: [], logs: [], market: null, discoveryImport: null, health: null, error: "" };
+
+      async function request(path, options = {}) {
+        const res = await fetch(API + path, {
+          ...options,
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: "Bearer " + token } : {}),
+            ...(options.headers || {}),
+          },
+        });
+        if (res.status === 204) return null;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || "Request failed");
+        return data;
+      }
+
+      function money(v) { return "$" + Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+      function pct(v) { return Number(v || 0).toFixed(1) + "%"; }
+      function num(v) { return Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 6 }); }
+      function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#039;" }[c])); }
+
+      async function login(e) {
+        e.preventDefault();
+        try {
+          const fd = new FormData(e.target);
+          const data = await request("/api/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email: fd.get("email"), password: fd.get("password") }),
+          });
+          token = data.access_token;
+          localStorage.setItem("novaion_token", token);
+          await loadDashboard();
+        } catch (err) { state.error = err.message; renderLogin(); }
+      }
+
+      async function boot() {
+        if (!token) return renderLogin();
+        await loadDashboard();
+      }
+
+      function renderLogin() {
+        document.getElementById("app").innerHTML = `
+          <main class="login-shell">
+            <section class="login">
+              <div>
+                <p class="eyebrow">Internal MVP</p>
+                <h1>NOVAION Smart Money Agent</h1>
+                <p>Research and paper-following only. No private keys, no live orders.</p>
+              </div>
+              ${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}
+              <form onsubmit="login(event)">
+                <label>Email<input name="email" type="email" value="admin@novaion.ai" required /></label>
+                <label>Password<input name="password" type="password" value="Novaion@123" required /></label>
+                <button class="btn">Sign in</button>
+              </form>
+            </section>
+          </main>`;
+      }
+
+      function shell(content) {
+        document.getElementById("app").innerHTML = `
+          <div class="shell">
+            <aside class="sidebar">
+              <div class="brand"><div class="mark">N</div><div><strong>NOVAION</strong><span>Smart Money MVP</span></div></div>
+              <nav class="nav">
+                ${["dashboard","wallets","discovery","signals","health","validation","settings"].map(k => `<button class="${page === k ? "active" : ""}" onclick="nav('${k}')">${k[0].toUpperCase()+k.slice(1)}</button>`).join("")}
+              </nav>
+              <button class="logout" onclick="logout()">Logout</button>
+            </aside>
+            <main>${content}</main>
+          </div>`;
+      }
+
+      async function nav(next) {
+        page = next;
+        selectedWallet = null;
+        if (next === "dashboard") await loadDashboard();
+        if (next === "wallets") await loadWallets();
+        if (next === "discovery") await loadDiscovery();
+        if (next === "signals") await loadSignals();
+        if (next === "health") await loadHealth();
+        if (next === "validation") await loadValidation();
+        if (next === "settings") await loadSettings();
+      }
+      function logout() { localStorage.removeItem("novaion_token"); token = ""; state.error = ""; renderLogin(); }
+
+      async function loadDashboard() {
+        try {
+          state.error = "";
+          const [summary, paper, quality, logs] = await Promise.all([
+            request("/api/dashboard/summary"),
+            request("/api/signals/paper/summary"),
+            request("/api/quality/dashboard"),
+            request("/api/system/logs?limit=20"),
+          ]);
+          state.summary = summary; state.paper = paper; state.quality = quality; state.logs = logs; page = "dashboard"; renderDashboard();
+        } catch (err) { state.error = err.message; renderLogin(); }
+      }
+
+      function renderHeader(title, action = "") {
+        return `<header class="header"><div><p class="eyebrow">NOVAION Smart Money Agent</p><h1>${title}</h1></div>${action}</header>${state.error ? `<div class="error">${esc(state.error)}</div>` : ""}`;
+      }
+      function metric(label, value) { return `<div class="card"><span>${label}</span><strong>${value}</strong></div>`; }
+
+      function renderDashboard() {
+        const s = state.summary || {}, p = state.paper || {}, q = state.quality || {};
+        shell(`
+          ${renderHeader("Dashboard", `<button class="ghost" onclick="generateReport()">Daily Report</button> <button class="ghost" onclick="refreshQuality()">Refresh Quality</button> <button class="ghost" onclick="loadDashboard()">Refresh</button>`)}
+          <div class="grid">${metric("Total wallets", s.total_wallets || 0)}${metric("Paper equity", money(p.current_equity || 1000))}${metric("Signal win rate", pct(q.signal_win_rate || 0))}${metric("Max drawdown", pct(q.max_drawdown || 0))}</div>
+          <section class="risk">${esc(q.live_test_recommendation || "Collecting data. Live trading remains disabled.")}</section>
+          <section class="section"><div class="section-title"><h2>7-Day Paper PnL Curve</h2><span>cumulative</span></div>${curveTable(q.seven_day_curve || [])}</section>
+          <section class="section"><div class="section-title"><h2>Wallet Contribution Ranking</h2><span>Phase 5 quality</span></div>${contributionTable(q.wallet_rankings || [])}</section>
+          <section class="section"><div class="section-title"><h2>Signal Type Analysis</h2><span>open / add / reduce / close</span></div>${typeTable(q.signal_type_analysis || [])}</section>
+          <section class="section"><div class="section-title"><h2>Wallet Ranking</h2><span>Read-only metrics</span></div>${rankingTable(s.rankings || [])}</section>
+          <section class="section"><div class="section-title"><h2>System Logs</h2><span>Latest 20</span></div>${logsTable(state.logs || [])}</section>
+        `);
+      }
+      async function refreshQuality() { await request("/api/quality/refresh-performance", { method: "POST" }); await loadDashboard(); }
+      async function generateReport() { await request("/api/quality/daily-report", { method: "POST" }); await loadDashboard(); }
+      function curveTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Date</th><th>Day PnL</th><th>Cumulative PnL</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.date}</td><td class="${r.pnl >= 0 ? "positive" : "negative"}">${money(r.pnl)}</td><td class="${r.cumulative_pnl >= 0 ? "positive" : "negative"}">${money(r.cumulative_pnl)}</td></tr>`).join("") || `<tr><td colspan="3">No paper PnL yet.</td></tr>`}</tbody></table></div>`;
+      }
+      function contributionTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Wallet</th><th>Signals</th><th>Paper PnL</th><th>Win Rate</th><th>Drawdown</th><th>Best Coin</th><th>Worst Coin</th><th>Grade</th><th>Advice</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.wallet_name)}</td><td>${r.signal_count}</td><td class="${r.simulated_pnl >= 0 ? "positive" : "negative"}">${money(r.simulated_pnl)}</td><td>${pct(r.win_rate)}</td><td>${pct(r.max_drawdown)}</td><td>${esc(r.best_symbol || "-")}</td><td>${esc(r.worst_symbol || "-")}</td><td><span class="pill ${r.grade === "S" || r.grade === "A" ? "active" : "warning"}">${r.grade}</span></td><td>${esc(r.keep_recommendation)}</td></tr>`).join("") || `<tr><td colspan="9">No wallet contribution data yet.</td></tr>`}</tbody></table></div>`;
+      }
+      function typeTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Type</th><th>Signals</th><th>Avg Return</th><th>Win Rate</th><th>Max Favorable</th><th>Max Adverse</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.signal_type}</td><td>${r.signal_count}</td><td class="${r.avg_return_24h >= 0 ? "positive" : "negative"}">${pct(r.avg_return_24h)}</td><td>${pct(r.win_rate_24h)}</td><td class="positive">${pct(r.avg_max_favorable)}</td><td class="negative">${pct(r.avg_max_adverse)}</td></tr>`).join("") || `<tr><td colspan="6">No signal type data yet.</td></tr>`}</tbody></table></div>`;
+      }
+      function rankingTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Wallet</th><th>Trades 30D</th><th>Realized PnL</th><th>Unrealized PnL</th><th>Win Rate</th><th>PF</th></tr></thead><tbody>
+          ${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${r.trades_30d}</td><td class="${r.realized_pnl >= 0 ? "positive" : "negative"}">${money(r.realized_pnl)}</td><td class="${r.unrealized_pnl >= 0 ? "positive" : "negative"}">${money(r.unrealized_pnl)}</td><td>${pct(r.win_rate)}</td><td>${num(r.profit_factor)}</td></tr>`).join("") || `<tr><td colspan="6">No metrics yet.</td></tr>`}
+        </tbody></table></div>`;
+      }
+      function logsTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Level</th><th>Module</th><th>Message</th><th>Time</th></tr></thead><tbody>
+          ${rows.map(l => `<tr><td><span class="pill ${l.level.toLowerCase()}">${l.level}</span></td><td>${esc(l.module)}</td><td>${esc(l.message)}</td><td>${new Date(l.created_at).toLocaleString()}</td></tr>`).join("") || `<tr><td colspan="4">No logs.</td></tr>`}
+        </tbody></table></div>`;
+      }
+
+      async function loadWallets() {
+        const [wallets, metrics] = await Promise.all([request("/api/wallets"), request("/api/market-data/wallet-metrics")]);
+        state.wallets = wallets; state.metrics = metrics; page = "wallets"; renderWallets();
+      }
+      async function saveWallet(e) {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = Object.fromEntries(fd.entries());
+        payload.manual_score = Number(payload.manual_score);
+        await request("/api/wallets", { method: "POST", body: JSON.stringify(payload) });
+        await loadWallets();
+      }
+      async function deleteWallet(id) { await request(`/api/wallets/${id}`, { method: "DELETE" }); await loadWallets(); }
+      async function syncWallets() { state.error = ""; try { await request("/api/market-data/refresh", { method: "POST" }); await loadWallets(); } catch (err) { state.error = err.message; renderWallets(); } }
+      async function openWallet(id) { selectedWallet = state.wallets.find(w => w.id === id); state.market = await request(`/api/market-data/wallets/${id}`); renderWalletDetail(); }
+      async function syncOne(id) { state.error = ""; try { await request(`/api/market-data/wallets/${id}/refresh`, { method: "POST" }); state.market = await request(`/api/market-data/wallets/${id}`); renderWalletDetail(); } catch (err) { state.error = err.message; renderWalletDetail(); } }
+
+      function renderWallets() {
+        const metricMap = Object.fromEntries(state.metrics.map(m => [m.wallet_id, m]));
+        shell(`
+          ${renderHeader("Wallet Watchlist", `<button class="ghost" onclick="syncWallets()">Sync</button> <button class="ghost" onclick="loadWallets()">Refresh</button>`)}
+          <section class="section"><div class="section-title"><h2>Add Wallet</h2><span>Hyperliquid public wallet address</span></div>
+            <form class="form panel" onsubmit="saveWallet(event)">
+              <label>Name<input name="name" required /></label>
+              <label>Address<input name="address" required /></label>
+              <label>Platform<select name="platform"><option value="hyperliquid">hyperliquid</option><option value="polymarket">polymarket</option></select></label>
+              <label>Status<select name="status"><option value="active">active</option><option value="disabled">disabled</option></select></label>
+              <label>Score<input name="manual_score" type="number" min="1" max="100" value="50" /></label>
+              <label>Tags<input name="tags" /></label>
+              <label class="wide">Notes<textarea name="notes"></textarea></label>
+              <div class="wide"><button class="btn">Add</button></div>
+            </form>
+          </section>
+          <section class="section"><div class="section-title"><h2>Watchlist</h2><span>${state.wallets.length} wallets</span></div>
+            <div class="panel"><table><thead><tr><th>Name</th><th>Platform</th><th>Score</th><th>Trades 30D</th><th>Win Rate</th><th>PnL</th><th>Status</th><th>Address</th><th></th></tr></thead><tbody>
+              ${state.wallets.map(w => { const m = metricMap[w.id] || {}; return `<tr><td><button class="ghost" onclick="openWallet(${w.id})">${esc(w.name)}</button></td><td>${w.platform}</td><td>${w.manual_score}</td><td>${m.trades_30d || 0}</td><td>${pct(m.win_rate)}</td><td>${money(m.realized_pnl)}</td><td><span class="pill ${w.status}">${w.status}</span></td><td class="mono">${esc(w.address)}</td><td><button class="ghost" onclick="deleteWallet(${w.id})">Delete</button></td></tr>` }).join("") || `<tr><td colspan="9">No wallets yet.</td></tr>`}
+            </tbody></table></div>
+          </section>
+        `);
+      }
+      function renderWalletDetail() {
+        const w = selectedWallet, m = state.market || {};
+        shell(`
+          ${renderHeader(w.name, `<button class="ghost" onclick="syncOne(${w.id})">Sync</button> <button class="ghost" onclick="loadWallets()">Back</button>`)}
+          <div class="grid">${metric("Platform", w.platform)}${metric("Score", w.manual_score)}${metric("Trades 30D", m.metric?.trades_30d || 0)}${metric("Win Rate", pct(m.metric?.win_rate || 0))}</div>
+          <section class="section"><div class="section-title"><h2>Positions</h2><span>${(m.positions || []).length} active</span></div>${positionsTable(m.positions || [])}</section>
+          <section class="section"><div class="section-title"><h2>Recent Fills</h2><span>${(m.fills || []).length} shown</span></div>${fillsTable(m.fills || [])}</section>
+          <section class="section"><div class="section-title"><h2>Open Orders</h2><span>${(m.open_orders || []).length} active</span></div><div class="panel" style="padding:16px">${esc(JSON.stringify((m.open_orders || []).slice(0,5))) || "No open orders."}</div></section>
+        `);
+      }
+      function positionsTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Coin</th><th>Side</th><th>Size</th><th>Entry</th><th>Value</th><th>Lev</th><th>UPnL</th></tr></thead><tbody>${rows.map(p => `<tr><td>${p.coin}</td><td>${p.side}</td><td>${num(p.size)}</td><td>${num(p.entry_price)}</td><td>${money(p.position_value)}</td><td>${num(p.leverage)}x</td><td class="${p.unrealized_pnl >= 0 ? "positive" : "negative"}">${money(p.unrealized_pnl)}</td></tr>`).join("") || `<tr><td colspan="7">No positions.</td></tr>`}</tbody></table></div>`;
+      }
+      function fillsTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Time</th><th>Coin</th><th>Side</th><th>Price</th><th>Size</th><th>Closed PnL</th></tr></thead><tbody>${rows.map(f => `<tr><td>${new Date(f.trade_time).toLocaleString()}</td><td>${f.coin}</td><td>${f.side}</td><td>${num(f.price)}</td><td>${num(f.size)}</td><td class="${f.closed_pnl >= 0 ? "positive" : "negative"}">${money(f.closed_pnl)}</td></tr>`).join("") || `<tr><td colspan="6">No fills.</td></tr>`}</tbody></table></div>`;
+      }
+
+      async function loadDiscovery() {
+        state.discovery = await request("/api/discovery/summary");
+        page = "discovery";
+        renderDiscovery();
+      }
+      async function runDiscovery() { state.error = ""; try { await request("/api/discovery/run", { method: "POST" }); await loadDiscovery(); } catch (err) { state.error = err.message; renderDiscovery(); } }
+      async function evaluateDiscovery() { state.error = ""; try { await request("/api/discovery/evaluate", { method: "POST" }); await loadDiscovery(); } catch (err) { state.error = err.message; renderDiscovery(); } }
+      async function autoAddDiscovery() { state.error = ""; try { await request("/api/discovery/auto-add", { method: "POST" }); await loadDiscovery(); } catch (err) { state.error = err.message; renderDiscovery(); } }
+      async function importDiscovery(e) {
+        e.preventDefault();
+        state.error = "";
+        try {
+          const fd = new FormData(e.target);
+          let content = fd.get("content") || "";
+          const file = fd.get("file");
+          if (file && file.size) content = await file.text();
+          state.discoveryImport = await request("/api/discovery/import", {
+            method: "POST",
+            body: JSON.stringify({ content, source_type: fd.get("source_type"), source_name: fd.get("source_name") || "manual-ui" }),
+          });
+          await loadDiscovery();
+        } catch (err) { state.error = err.message; renderDiscovery(); }
+      }
+      async function approveCandidate(id) { state.error = ""; try { await request(`/api/discovery/candidates/${id}/approve`, { method: "POST" }); await loadDiscovery(); } catch (err) { state.error = err.message; renderDiscovery(); } }
+      function renderDiscovery() {
+        const d = state.discovery || {};
+        shell(`
+          ${renderHeader("Discovery Center", `<button class="ghost" onclick="runDiscovery()">Run Discovery</button> <button class="ghost" onclick="evaluateDiscovery()">Evaluate</button> <button class="ghost" onclick="loadDiscovery()">Refresh</button>`)}
+          <section class="risk">Discovery uses configured public sources and Hyperliquid read-only APIs. Official requester-pays S3 data requires AWS credentials; no private keys or live trading are used.</section>
+          <div class="grid">${metric("Candidates", d.total_candidates || 0)}${metric("Recommended", d.recommended || 0)}${metric("Approved", d.approved || 0)}${metric("Failed", d.failed || 0)}</div>
+          <section class="section"><div class="section-title"><h2>Discovery Import</h2><span>TXT / CSV / batch paste</span></div>${importPanel()}</section>
+          <section class="section"><div class="section-title"><h2>Candidate Wallet Pool</h2><span>ranked by score</span></div>${candidateTable(d.top_candidates || [])}</section>
+          <section class="section"><div class="section-title"><h2>Recent Discovery Runs</h2><span>daily job history</span></div>${discoveryRunsTable(d.recent_runs || [])}</section>
+        `);
+      }
+      function importPanel() {
+        const r = state.discoveryImport;
+        return `<form class="form panel" onsubmit="importDiscovery(event)">
+          <label>Source type<select name="source_type"><option value="txt">TXT / Paste</option><option value="csv">CSV</option></select></label>
+          <label>Source name<input name="source_name" value="manual-ui" /></label>
+          <label>File<input name="file" type="file" accept=".txt,.csv,text/plain,text/csv" /></label>
+          <label class="wide">Batch paste<textarea name="content" placeholder="Paste 0x wallet addresses, one per line or inside CSV text"></textarea></label>
+          <div class="wide"><button class="btn">Import Candidates</button></div>
+          ${r ? `<div class="wide grid">${metric("Total", r.total_count)}${metric("Valid", r.valid_count)}${metric("Invalid", r.invalid_count)}${metric("Inserted", r.inserted_count)}</div><div class="wide">${metric("Duplicates", r.duplicate_count)}</div>` : ""}
+        </form>`;
+      }
+      function candidateTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Address</th><th>Grade</th><th>Score</th><th>Risk</th><th>Status</th><th>Hard Filter</th><th>Soft Watch</th><th>Warnings</th><th>Est ROI</th><th>Est PnL</th><th>Gross Profit</th><th>Trades 30D</th><th>Win Rate</th><th>PF</th><th>Failed Reasons</th><th></th></tr></thead><tbody>${rows.map(c => `<tr><td class="mono">${esc(c.address)}</td><td><span class="pill ${c.grade === "S" || c.grade === "A" ? "active" : "warning"}">${esc(c.grade || "Watch")}</span></td><td>${c.score}</td><td>${c.risk_score}</td><td><span class="pill ${c.status}">${c.status}</span></td><td><span class="pill ${c.hard_filter_pass ? "active" : "ignored"}">${c.hard_filter_pass ? "Pass" : "Fail"}</span></td><td><span class="pill ${c.soft_watch_eligible ? "warning" : "active"}">${c.soft_watch_eligible ? "Eligible" : "Not Eligible"}</span></td><td>${c.metrics_estimated || !c.funding_included ? "Estimated Metrics" : "-"}</td><td class="${c.roi >= 0 ? "positive" : "negative"}">${pct(c.roi)}</td><td class="${c.total_pnl >= 0 ? "positive" : "negative"}">${money(c.total_pnl)}</td><td>${money(c.gross_profit)}</td><td>${c.trades_30d}</td><td>${pct(c.win_rate)}</td><td>${num(c.profit_factor)}</td><td>${esc(c.failed_reasons || c.failure_reason || c.reason || "")}</td><td>${c.status === "recommended" || c.status === "evaluated" ? `<button class="ghost" onclick="approveCandidate(${c.id})">Approve</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="16">No candidates yet. Configure DISCOVERY_SOURCE_URLS or data/discovery_wallets.txt, then run discovery.</td></tr>`}</tbody></table></div>`;
+      }
+      function discoveryRunsTable(rows) {
+        return `<div class="panel"><table><thead><tr><th>Started</th><th>Finished</th><th>Status</th><th>Scanned</th><th>Evaluated</th><th>Recommended</th><th>Failed</th><th>No Activity</th><th>Error</th></tr></thead><tbody>${rows.map(r => `<tr><td>${new Date(r.started_at).toLocaleString()}</td><td>${r.finished_at ? new Date(r.finished_at).toLocaleString() : "-"}</td><td><span class="pill ${r.status}">${r.status}</span></td><td>${r.scanned_count}</td><td>${r.evaluated_count}</td><td>${r.recommended_count}</td><td>${r.failed_count}</td><td>${r.no_activity_count}</td><td>${esc(r.error_message || "")}</td></tr>`).join("") || `<tr><td colspan="9">No discovery runs yet.</td></tr>`}</tbody></table></div>`;
+      }
+
+      async function loadHealth() {
+        state.health = await request("/api/system/health");
+        page = "health";
+        renderHealth();
+      }
+      function renderHealth() {
+        const h = state.health || {};
+        const api = h.hyperliquid_api || {};
+        const db = h.database || {};
+        shell(`
+          ${renderHeader("Health Center", `<button class="ghost" onclick="loadHealth()">Refresh</button>`)}
+          <div class="grid">${metric("Overall", h.overall_status || "-")}${metric("Uptime", h.uptime || "-")}${metric("API", h.api_status || "-")}${metric("Database", h.database_status || "-")}</div>
+          <div class="grid">${metric("Scheduler", h.scheduler_status || "-")}${metric("Telegram", h.telegram_status || "-")}${metric("Hyperliquid API", h.hyperliquid_api_status || "-")}${metric("Paper Trading", h.paper_trading_status || "-")}</div>
+          <div class="grid">${metric("Wallet Sync", h.wallet_sync_status || "-")}${metric("Discovery", h.discovery_status || "-")}${metric("Last Sync", h.last_wallet_sync_at ? new Date(h.last_wallet_sync_at).toLocaleString() : "-")}${metric("Last Discovery", h.last_discovery_run_at ? new Date(h.last_discovery_run_at).toLocaleString() : "-")}</div>
+          <div class="grid">${metric("Last Signal", h.last_signal_generated_at ? new Date(h.last_signal_generated_at).toLocaleString() : "-")}${metric("Last Daily Report", h.last_daily_report_at ? new Date(h.last_daily_report_at).toLocaleString() : "-")}${metric("Errors 24h", h.system_error_count_24h || 0)}${metric("DB Latency", (db.query_latency_ms || 0) + "ms")}</div>
+          <section class="section"><div class="section-title"><h2>Hyperliquid API Throughput</h2><span>last 60 minutes</span></div><div class="grid">${metric("Requests", api.request_count || 0)}${metric("Success Rate", pct(api.success_rate || 0))}${metric("Error Rate", pct(api.error_rate || 0))}${metric("Avg Response", (api.avg_response_ms || 0) + "ms")}</div></section>
+          <section class="section"><div class="section-title"><h2>Operational Counts</h2><span>alerts and syncs</span></div><div class="grid">${metric("Wallet Sync OK", h.wallet_sync_success_count || 0)}${metric("Wallet Sync Fail", h.wallet_sync_failure_count || 0)}${metric("Discovery OK", h.discovery_success_count || 0)}${metric("Discovery Fail", h.discovery_failure_count || 0)}</div></section>
+        `);
+      }
+
+      async function loadValidation() {
+        const [readiness, dashboard] = await Promise.all([request("/api/validation/readiness"), request("/api/validation/dashboard")]);
+        state.validation = { readiness, dashboard };
+        page = "validation";
+        renderValidation();
+      }
+      function renderValidation() {
+        const r = state.validation?.readiness || {};
+        const d = state.validation?.dashboard || {};
+        shell(`
+          ${renderHeader("Validation Dashboard", `<button class="ghost" onclick="loadValidation()">Refresh</button>`)}
+          <section class="risk">${r.can_start_7_day_validation ? "Ready for 7-day validation." : "Not ready: " + esc((r.blocking_reasons || []).join(", "))}</section>
+          <div class="grid">${metric("Wallets", r.wallets_count || 0)}${metric("Candidates", r.discovery_candidates_count || 0)}${metric("Recommended", r.recommended_count || 0)}${metric("Telegram", r.telegram_configured ? "configured" : "missing")}</div>
+          <section class="section"><div class="section-title"><h2>Day1-Day7</h2><span>validation mode</span></div><div class="panel"><table><thead><tr><th>Day</th><th>Date</th><th>Signals</th><th>Paper Trades</th><th>PnL</th><th>Win Rate</th><th>Best Wallet</th><th>Worst Wallet</th><th>Health</th></tr></thead><tbody>${(d.days || []).map(row => `<tr><td>${row.day}</td><td>${row.date}</td><td>${row.signals_count}</td><td>${row.paper_trades_count}</td><td class="${row.pnl >= 0 ? "positive" : "negative"}">${money(row.pnl)}</td><td>${pct(row.win_rate)}</td><td>${esc(row.best_wallet || "-")}</td><td>${esc(row.worst_wallet || "-")}</td><td>${esc(row.system_health_status)}</td></tr>`).join("")}</tbody></table></div></section>
+        `);
+      }
+
+      async function loadSignals() {
+        const [signals, trades, paper] = await Promise.all([request("/api/signals"), request("/api/signals/paper/trades"), request("/api/signals/paper/summary")]);
+        state.signals = signals; state.trades = trades; state.paper = paper; page = "signals"; renderSignals();
+      }
+      async function patchSignal(id, status) { await request(`/api/signals/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }); await loadSignals(); }
+      async function simulate(id) { try { await request(`/api/signals/${id}/simulate`, { method: "POST" }); } catch (err) { state.error = err.message; } await loadSignals(); }
+      async function closeTrade(id) { await request(`/api/signals/paper/trades/${id}/close`, { method: "POST" }); await loadSignals(); }
+      function renderSignals() {
+        const p = state.paper || {};
+        shell(`
+          ${renderHeader("Signals", `<button class="ghost" onclick="loadSignals()">Refresh</button>`)}
+          <div class="grid">${metric("Equity", money(p.current_equity || 1000))}${metric("Open positions", p.open_positions || 0)}${metric("Total PnL", money(p.total_pnl || 0))}${metric("Win Rate", pct(p.win_rate || 0))}</div>
+          <section class="section"><div class="section-title"><h2>Signal Inbox</h2><span>${state.signals.length} signals</span></div>
+            <div class="panel"><table><thead><tr><th>Time</th><th>Wallet</th><th>Signal</th><th>Size</th><th>Confidence</th><th>Risk</th><th>Status</th><th></th></tr></thead><tbody>
+              ${state.signals.map(s => `<tr><td>${new Date(s.created_at).toLocaleString()}</td><td>${esc(s.wallet_name || s.wallet_id)}</td><td>${s.symbol} ${s.side} / ${s.signal_type}</td><td>${money(s.source_size)}</td><td>${s.confidence_score}</td><td class="${s.risk_score > 80 ? "negative" : ""}">${s.risk_score}</td><td><span class="pill ${s.status}">${s.status}</span></td><td class="row-actions"><button class="ghost" onclick="simulate(${s.id})">Sim</button><button class="ghost" onclick="patchSignal(${s.id}, 'read')">Read</button><button class="ghost" onclick="patchSignal(${s.id}, 'ignored')">Ignore</button></td></tr>`).join("") || `<tr><td colspan="8">No signals yet.</td></tr>`}
+            </tbody></table></div>
+          </section>
+          <section class="section"><div class="section-title"><h2>Paper Trades</h2><span>${state.trades.length} recent</span></div>
+            <div class="panel"><table><thead><tr><th>Opened</th><th>Symbol</th><th>Side</th><th>Entry</th><th>Size</th><th>Lev</th><th>Status</th><th>Raw PnL</th><th>Fees</th><th>Slippage</th><th>Net PnL</th><th></th></tr></thead><tbody>
+              ${state.trades.map(t => `<tr><td>${new Date(t.opened_at).toLocaleString()}</td><td>${t.symbol}</td><td>${t.side}</td><td>${num(t.entry_price)}</td><td>${money(t.size_usd)}</td><td>${num(t.leverage)}x</td><td><span class="pill ${t.status}">${t.status}</span></td><td class="${t.raw_pnl >= 0 ? "positive" : "negative"}">${money(t.raw_pnl)}</td><td>${money(t.fees)}</td><td class="${t.slippage_adjustment >= 0 ? "positive" : "negative"}">${money(t.slippage_adjustment)}</td><td class="${t.net_pnl >= 0 ? "positive" : "negative"}">${money(t.net_pnl || t.pnl)}</td><td>${t.status === "open" ? `<button class="ghost" onclick="closeTrade(${t.id})">Close</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="12">No paper trades.</td></tr>`}
+            </tbody></table></div>
+          </section>
+        `);
+      }
+      async function loadSettings() {
+        state.riskRules = await request("/api/quality/risk-rules");
+        page = "settings";
+        renderSettings();
+      }
+      async function saveRiskRules(e) {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const split = (value) => String(value || "").split(",").map(v => v.trim()).filter(Boolean);
+        const payload = {
+          blacklist_wallets: split(fd.get("blacklist_wallets")),
+          whitelist_wallets: split(fd.get("whitelist_wallets")),
+          blacklist_symbols: split(fd.get("blacklist_symbols")),
+          min_wallet_score: Number(fd.get("min_wallet_score")),
+          max_allowed_leverage: Number(fd.get("max_allowed_leverage")),
+          min_trades: Number(fd.get("min_trades")),
+          min_30d_win_rate: Number(fd.get("min_30d_win_rate")),
+          only_grade_a_or_s: fd.get("only_grade_a_or_s") === "on",
+        };
+        await request("/api/quality/risk-rules", { method: "PUT", body: JSON.stringify(payload) });
+        await loadSettings();
+      }
+      function renderSettings() {
+        const r = state.riskRules || {};
+        shell(`${renderHeader("Settings")}<section class="risk">Trading is risky. This MVP is research and simulation only. Simulated results do not represent future returns.</section><div class="grid">${metric("enable_live_trading", "false")}${metric("require_manual_approval", "true")}${metric("max_live_order_usd", "20")}${metric("emergency_stop", "true")}</div>
+          <section class="section"><div class="section-title"><h2>Risk Filters</h2><span>applied before signal creation</span></div>
+            <form class="form panel" onsubmit="saveRiskRules(event)">
+              <label>Blacklist wallets<input name="blacklist_wallets" value="${esc((r.blacklist_wallets || []).join(", "))}" /></label>
+              <label>Whitelist wallets<input name="whitelist_wallets" value="${esc((r.whitelist_wallets || []).join(", "))}" /></label>
+              <label>Blacklist coins<input name="blacklist_symbols" value="${esc((r.blacklist_symbols || []).join(", "))}" /></label>
+              <label>Min wallet score<input name="min_wallet_score" type="number" value="${r.min_wallet_score ?? 50}" /></label>
+              <label>Max leverage<input name="max_allowed_leverage" type="number" value="${r.max_allowed_leverage ?? 10}" /></label>
+              <label>Min trades<input name="min_trades" type="number" value="${r.min_trades ?? 10}" /></label>
+              <label>Min 30D win rate<input name="min_30d_win_rate" type="number" value="${r.min_30d_win_rate ?? 45}" /></label>
+              <label><span>Only S/A wallets</span><input name="only_grade_a_or_s" type="checkbox" ${r.only_grade_a_or_s ? "checked" : ""} /></label>
+              <div class="wide"><button class="btn">Save Risk Filters</button></div>
+            </form>
+          </section>`);
+      }
+      boot();
+    </script>
+  </body>
+</html>
