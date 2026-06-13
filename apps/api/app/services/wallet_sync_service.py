@@ -64,6 +64,7 @@ def sync_wallet_market_data(db: Session, wallet: Wallet) -> dict[str, Any]:
         state.cursor_value = str(now_ms - 60_000)
     state.status = "ok"
     state.error_message = ""
+    state.updated_at = now
     db.commit()
 
     clearinghouse_state = client.get_clearinghouse_state(wallet.address)

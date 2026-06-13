@@ -4,6 +4,7 @@ import inspect
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -19,7 +20,8 @@ def run_with_task_lock(db: Session, task_name: str, fn: Callable[..., Any]) -> A
     now = datetime.now(timezone.utc)
     lock = db.query(TaskLock).filter(TaskLock.task_name == task_name).first()
     stale_after = now - timedelta(minutes=get_settings().task_lock_stale_minutes)
-    if lock and lock.status == "running" and lock.heartbeat_at and lock.heartbeat_at > stale_after:
+    heartbeat_at = _as_utc(lock.heartbeat_at) if lock and lock.heartbeat_at else None
+    if lock and lock.status == "running" and heartbeat_at and heartbeat_at > stale_after:
         write_log(db, level="info", module="task_lock", message="Task skipped because lock is running", payload={"task": task_name})
         return {"skipped": True}
     if not lock:
@@ -57,6 +59,12 @@ def update_task_heartbeat(db: Session, task_name: str) -> datetime:
     return lock.heartbeat_at
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _call_with_optional_heartbeat(fn: Callable[..., Any], heartbeat: Callable[[], datetime]) -> Any:
     try:
         parameters = inspect.signature(fn).parameters
@@ -73,6 +81,19 @@ def record_hyperliquid_metric(db: Session, *, success: bool, latency_ms: float, 
     if not metric:
         metric = HyperliquidApiMetric(minute_bucket=bucket)
         db.add(metric)
+    _apply_hyperliquid_metric(metric, success=success, latency_ms=latency_ms, error=error)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        metric = db.query(HyperliquidApiMetric).filter(HyperliquidApiMetric.minute_bucket == bucket).first()
+        if not metric:
+            raise
+        _apply_hyperliquid_metric(metric, success=success, latency_ms=latency_ms, error=error)
+        db.commit()
+
+
+def _apply_hyperliquid_metric(metric: HyperliquidApiMetric, *, success: bool, latency_ms: float, error: str = "") -> None:
     metric.request_count = (metric.request_count or 0) + 1
     metric.total_latency_ms = (metric.total_latency_ms or 0) + latency_ms
     if success:
@@ -84,7 +105,6 @@ def record_hyperliquid_metric(db: Session, *, success: bool, latency_ms: float, 
             metric.timeout_count = (metric.timeout_count or 0) + 1
         if "429" in lower or "rate" in lower:
             metric.rate_limit_count = (metric.rate_limit_count or 0) + 1
-    db.commit()
 
 
 def hyperliquid_api_summary(db: Session) -> dict[str, Any]:

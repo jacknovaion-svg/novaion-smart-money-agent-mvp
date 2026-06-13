@@ -43,7 +43,7 @@ def start_scheduler() -> None:
     )
     scheduler.add_job(_daily_report_job, "cron", hour=8 if settings.validation_mode else 23, minute=0 if settings.validation_mode else 55, id="generate_daily_report", replace_existing=True, max_instances=1)
     if settings.validation_mode:
-        scheduler.add_job(_discovery_job, "interval", minutes=15, id="wallet_discovery", replace_existing=True, max_instances=1)
+        scheduler.add_job(_discovery_job, "interval", hours=8, id="wallet_discovery", replace_existing=True, max_instances=1)
         scheduler.add_job(_paper_trade_update_job, "interval", minutes=15, id="paper_trade_update", replace_existing=True, max_instances=1)
         scheduler.add_job(_health_report_job, "cron", hour=20, minute=0, id="health_report", replace_existing=True, max_instances=1)
     else:
