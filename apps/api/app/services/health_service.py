@@ -34,7 +34,7 @@ def system_health(db: Session) -> dict[str, Any]:
     recent_since = now - timedelta(hours=24)
     settings = get_settings()
     wallet_sync_status = _lag_status(last_sync.updated_at if last_sync else None, warning_minutes=5, critical_minutes=15)
-    discovery_status = _lag_status(last_discovery.finished_at if last_discovery else None, warning_minutes=20, critical_minutes=60)
+    discovery_status = _lag_status(last_discovery.finished_at if last_discovery else None, warning_minutes=540, critical_minutes=720)
     scheduler_status = "running" if scheduler.running else "stopped"
     statuses = [
         "ok" if database_ok else "critical",
