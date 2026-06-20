@@ -18,6 +18,8 @@ from app.services.paper_trading_service import (
     close_paper_trade,
     unrealized_pnl_for_price,
 )
+from app.services.paper_account_service import paper_account_metrics
+from app.services.paper_trading_telegram_service import send_paper_trade_boss_notification
 from app.services.system_log_service import write_log
 
 
@@ -35,6 +37,7 @@ PAPER_ACTIONS = {
     "high_risk",
     "zero_size",
     "missing_data",
+    "insufficient_paper_funds",
 }
 
 
@@ -254,6 +257,7 @@ def _process_open(db: Session, signal: Signal) -> dict[str, Any]:
         return _ignore_signal(db, signal, "duplicate_open", paper_trade_id=existing.id)
     trade = add_signal_to_paper(db, signal)
     _log_action(db, signal, "paper_opened", {"paper_trade_id": trade.id}, paper_trade_id=trade.id)
+    send_paper_trade_boss_notification(db, event_type="open", trade=trade, signal=signal)
     return {"status": "simulated", "action": "paper_opened", "paper_trade_id": trade.id}
 
 
@@ -270,6 +274,15 @@ def _process_add(db: Session, signal: Signal) -> dict[str, Any]:
     add_size = min(signal.suggested_size_usd or 0, capacity)
     if add_size <= 0:
         return _ignore_signal(db, signal, "zero_size", {"reason": "max_position_reached"}, paper_trade_id=trade.id)
+    metrics = paper_account_metrics(db)
+    if metrics["available_funds_raw"] < add_size:
+        return _ignore_signal(
+            db,
+            signal,
+            "insufficient_paper_funds",
+            {"requested_add_margin": add_size, "available_funds": metrics["available_funds_raw"]},
+            paper_trade_id=trade.id,
+        )
 
     raw_price = _signal_price(signal)
     entry_price = _entry_price(side, raw_price)
@@ -291,6 +304,13 @@ def _process_add(db: Session, signal: Signal) -> dict[str, Any]:
         "paper_added",
         {"paper_trade_id": trade.id, "added_size_usd": add_size, "new_size_usd": trade.size_usd},
         paper_trade_id=trade.id,
+    )
+    send_paper_trade_boss_notification(
+        db,
+        event_type="add",
+        trade=trade,
+        signal=signal,
+        event_payload={"added_size_usd": add_size, "new_size_usd": trade.size_usd},
     )
     return {"status": "simulated", "action": "paper_added", "paper_trade_id": trade.id}
 
@@ -336,6 +356,13 @@ def _process_reduce(db: Session, signal: Signal) -> dict[str, Any]:
         },
         paper_trade_id=trade.id,
     )
+    send_paper_trade_boss_notification(
+        db,
+        event_type="reduce",
+        trade=trade,
+        signal=signal,
+        event_payload={"realized_pnl": realized["net_pnl"], "reduced_size_usd": reduce_size},
+    )
     return {"status": "simulated", "action": "paper_reduced", "paper_trade_id": trade.id}
 
 
@@ -358,6 +385,7 @@ def _process_close(db: Session, signal: Signal) -> dict[str, Any]:
     signal.status = "simulated"
     db.commit()
     _log_action(db, signal, "paper_closed", {"paper_trade_id": trade.id, "realized_pnl": trade.pnl}, paper_trade_id=trade.id)
+    send_paper_trade_boss_notification(db, event_type="close", trade=trade, signal=signal)
     return {"status": "simulated", "action": "paper_closed", "paper_trade_id": trade.id}
 
 

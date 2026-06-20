@@ -11,6 +11,7 @@ from app.models.wallet import Wallet
 from app.services.hyperliquid_client import HyperliquidApiClient
 from app.services.system_log_service import write_log
 from app.services.telegram_service import send_daily_report_notification
+from app.services.paper_trading_telegram_service import send_paper_daily_boss_summary
 
 
 WINDOWS = [
@@ -199,6 +200,7 @@ def generate_daily_report(db: Session, report_date: Optional[str] = None, send_t
     db.refresh(report)
     if send_telegram:
         send_daily_report_notification(db, report)
+        send_paper_daily_boss_summary(db, report_date=day)
     return report
 
 
