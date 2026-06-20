@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = 60
     paper_taker_fee_rate: float = 0.0005
     paper_slippage_rate: float = 0.001
+    paper_max_position_usd: float = 50
+    paper_trading_cutover_at: str = ""
     task_lock_stale_minutes: int = 30
     validation_mode: bool = True
     validation_days: int = 7

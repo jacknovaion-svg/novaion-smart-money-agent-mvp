@@ -51,6 +51,9 @@ class PaperTradeRead(BaseModel):
     fees: float
     slippage_adjustment: float
     net_pnl: float
+    mark_price: float = 0
+    unrealized_pnl: float = 0
+    unrealized_pnl_pct: float = 0
     opened_at: datetime
     closed_at: Optional[datetime]
 
