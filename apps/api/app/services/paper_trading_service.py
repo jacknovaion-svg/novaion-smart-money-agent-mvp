@@ -71,23 +71,32 @@ def add_signal_to_paper(db: Session, signal: Signal) -> PaperTrade:
 
 def close_paper_trade(db: Session, trade: PaperTrade, exit_price: Optional[float] = None) -> PaperTrade:
     if trade.status != "open":
+        write_log(
+            db,
+            level="info",
+            module="paper_trading",
+            message="Paper trade already closed",
+            payload={"trade_id": trade.id, "action": "already_closed"},
+        )
         return trade
     raw_exit = exit_price or trade.exit_price or trade.entry_price
     price = _exit_price(trade.side, raw_exit)
     trade.exit_price = price
-    raw_pnl = _calculate_raw_pnl(trade, price)
-    fees = _fees(trade, price)
-    slippage_adjustment = _calculate_raw_pnl(trade, raw_exit) - raw_pnl
-    trade.raw_pnl = raw_pnl
-    trade.fees = fees
-    trade.slippage_adjustment = round(slippage_adjustment, 6)
-    trade.net_pnl = round(raw_pnl - fees, 6)
+    close_raw_pnl = _calculate_raw_pnl(trade, price)
+    close_fees = _fees(trade, price)
+    close_slippage_adjustment = _calculate_raw_pnl(trade, raw_exit) - close_raw_pnl
+    trade.raw_pnl = round((trade.raw_pnl or 0) + close_raw_pnl, 6)
+    trade.fees = round((trade.fees or 0) + close_fees, 6)
+    trade.slippage_adjustment = round((trade.slippage_adjustment or 0) + close_slippage_adjustment, 6)
+    trade.net_pnl = round((trade.net_pnl or 0) + close_raw_pnl - close_fees, 6)
     trade.pnl = trade.net_pnl
+    trade.size_usd = 0
     trade.mark_price = raw_exit
     trade.unrealized_pnl = 0
     trade.unrealized_pnl_pct = 0
     trade.status = "closed"
     trade.closed_at = datetime.now(timezone.utc)
+    trade.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(trade)
     write_log(

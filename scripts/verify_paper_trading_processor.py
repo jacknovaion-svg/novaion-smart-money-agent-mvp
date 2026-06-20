@@ -4,6 +4,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from sqlalchemy import event
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
@@ -142,6 +144,68 @@ def main() -> None:
         db.refresh(xrp_trade)
         check("fees and slippage included", close_fee_signal.status == "simulated" and xrp_trade.fees > 0 and xrp_trade.slippage_adjustment != 0)
 
+        direct = _run_sequence(db, cutover, "Direct Close", [("open", "long", 100), ("close", "long", 110)])
+        check("direct close net pnl is single close result", direct["trade"]["status"] == "closed" and direct["trade"]["pnl"] == direct["sum"]["net_pnl"])
+        check("direct close zeroes remaining size", direct["trade"]["size_usd"] == 0)
+
+        one_reduce = _run_sequence(db, cutover, "One Reduce Close", [("open", "long", 100), ("reduce", "long", 110), ("close", "long", 120)])
+        check("one reduce then close cumulative pnl", _fields_match_sum(one_reduce))
+
+        two_reduce = _run_sequence(
+            db,
+            cutover,
+            "Two Reduce Close",
+            [("open", "long", 100), ("reduce", "long", 110), ("reduce", "long", 120), ("close", "long", 130)],
+        )
+        check("two reduces then close cumulative raw pnl", two_reduce["trade"]["raw_pnl"] == two_reduce["sum"]["raw_pnl"])
+        check("two reduces then close cumulative fees", two_reduce["trade"]["fees"] == two_reduce["sum"]["fees"])
+        check("two reduces then close cumulative slippage", two_reduce["trade"]["slippage_adjustment"] == two_reduce["sum"]["slippage_adjustment"])
+        check("two reduces then close cumulative net pnl", two_reduce["trade"]["net_pnl"] == two_reduce["sum"]["net_pnl"])
+        check("two reduces then close pnl equals net pnl", two_reduce["trade"]["pnl"] == two_reduce["trade"]["net_pnl"])
+
+        losing = _run_sequence(db, cutover, "Losing Long", [("open", "long", 100), ("reduce", "long", 90), ("close", "long", 80)])
+        check("losing reduce close accumulates negative pnl", _fields_match_sum(losing) and losing["trade"]["pnl"] < 0)
+
+        short = _run_sequence(db, cutover, "Short Close", [("open", "short", 100), ("reduce", "short", 90), ("close", "short", 80)])
+        check("short reduce close cumulative pnl", _fields_match_sum(short) and short["trade"]["pnl"] > 0)
+
+        duplicate_close = _run_sequence(db, cutover, "Duplicate Close", [("open", "long", 100), ("close", "long", 110)])
+        dup_signal = duplicate_close["signals"][-1]
+        dup_trade = db.get(PaperTrade, duplicate_close["trade"]["id"])
+        before_duplicate = _trade_snapshot(dup_trade)
+        process_new_signals_for_paper_trading(db, cutover_at=cutover)
+        db.refresh(dup_trade)
+        check("duplicate close processor run does not recalculate", dup_signal.status == "simulated" and _trade_snapshot(dup_trade) == before_duplicate)
+
+        rollback_wallet = _wallet(db, "0x0000000000000000000000000000000000000005", "Rollback")
+        rollback_open = _signal(db, rollback_wallet.id, "UNI", "open", "long", 100, after=after + timedelta(seconds=50))
+        process_new_signals_for_paper_trading(db, cutover_at=cutover)
+        rollback_trade = _open_trade(db, rollback_wallet.id, "UNI", "long")
+        rollback_close = _signal(db, rollback_wallet.id, "UNI", "close", "long", 110, after=after + timedelta(seconds=51))
+        fail_once = {"active": True}
+
+        def fail_before_commit(session):
+            if fail_once["active"]:
+                fail_once["active"] = False
+                raise RuntimeError("simulated close commit failure")
+
+        event.listen(db, "before_commit", fail_before_commit)
+        try:
+            process_new_signals_for_paper_trading(db, cutover_at=cutover)
+        finally:
+            event.remove(db, "before_commit", fail_before_commit)
+        db.expire_all()
+        rollback_trade = db.get(PaperTrade, rollback_trade.id)
+        rollback_close = db.get(Signal, rollback_close.id)
+        check(
+            "close failure rolls back partial trade update",
+            rollback_close.status == "failed"
+            and rollback_trade.status == "open"
+            and rollback_trade.pnl == 0
+            and rollback_trade.fees == 0
+            and rollback_trade.size_usd == 20,
+        )
+
         passed = len([item for item in tests if item["passed"]])
         output = {
             "tests_total": len(tests),
@@ -215,6 +279,83 @@ def _open_trade(db, wallet_id: int, symbol: str, side: str):
         db.query(PaperTrade)
         .filter(PaperTrade.wallet_id == wallet_id, PaperTrade.symbol == symbol, PaperTrade.side == side, PaperTrade.status == "open")
         .first()
+    )
+
+
+def _run_sequence(db, cutover: datetime, name: str, steps: list[tuple[str, str, float]]):
+    from app.models.signal import PaperTrade, Signal
+    from app.models.wallet import Wallet
+    from app.services.paper_trading_processor import process_new_signals_for_paper_trading
+
+    index = 1000 + db.query(Wallet).count()
+    wallet = _wallet(db, f"0x{index + 100:040x}", name)
+    symbol = f"T{index}"
+    after = cutover + timedelta(hours=1, seconds=index)
+    signals = []
+    increments = []
+    trade = None
+    previous = None
+    for offset, (signal_type, side, price) in enumerate(steps):
+        signal = _signal(db, wallet.id, symbol, signal_type, side, price, after=after + timedelta(seconds=offset))
+        signals.append(signal)
+        process_new_signals_for_paper_trading(db, cutover_at=cutover)
+        trade = (
+            db.query(PaperTrade)
+            .filter(PaperTrade.wallet_id == wallet.id, PaperTrade.symbol == symbol)
+            .order_by(PaperTrade.id.desc())
+            .first()
+        )
+        db.refresh(signal)
+        if trade:
+            db.refresh(trade)
+            current = _trade_snapshot(trade)
+            if signal_type in {"reduce", "close"}:
+                base = previous or {"raw_pnl": 0, "fees": 0, "slippage_adjustment": 0, "net_pnl": 0, "pnl": 0}
+                increments.append(
+                    {
+                        "step": signal_type,
+                        "raw_pnl": round(current["raw_pnl"] - base["raw_pnl"], 6),
+                        "fees": round(current["fees"] - base["fees"], 6),
+                        "slippage_adjustment": round(current["slippage_adjustment"] - base["slippage_adjustment"], 6),
+                        "net_pnl": round(current["net_pnl"] - base["net_pnl"], 6),
+                        "pnl": round(current["pnl"] - base["pnl"], 6),
+                    }
+                )
+            previous = current
+    totals = {
+        "raw_pnl": round(sum(item["raw_pnl"] for item in increments), 6),
+        "fees": round(sum(item["fees"] for item in increments), 6),
+        "slippage_adjustment": round(sum(item["slippage_adjustment"] for item in increments), 6),
+        "net_pnl": round(sum(item["net_pnl"] for item in increments), 6),
+        "pnl": round(sum(item["pnl"] for item in increments), 6),
+    }
+    return {"wallet": wallet.id, "symbol": symbol, "signals": signals, "increments": increments, "sum": totals, "trade": _trade_snapshot(trade)}
+
+
+def _trade_snapshot(trade):
+    return {
+        "id": trade.id,
+        "status": trade.status,
+        "size_usd": round(trade.size_usd or 0, 6),
+        "raw_pnl": round(trade.raw_pnl or 0, 6),
+        "fees": round(trade.fees or 0, 6),
+        "slippage_adjustment": round(trade.slippage_adjustment or 0, 6),
+        "net_pnl": round(trade.net_pnl or 0, 6),
+        "pnl": round(trade.pnl or 0, 6),
+        "unrealized_pnl": round(trade.unrealized_pnl or 0, 6),
+        "unrealized_pnl_pct": round(trade.unrealized_pnl_pct or 0, 6),
+    }
+
+
+def _fields_match_sum(result) -> bool:
+    trade = result["trade"]
+    totals = result["sum"]
+    return (
+        trade["raw_pnl"] == totals["raw_pnl"]
+        and trade["fees"] == totals["fees"]
+        and trade["slippage_adjustment"] == totals["slippage_adjustment"]
+        and trade["net_pnl"] == totals["net_pnl"]
+        and trade["pnl"] == totals["net_pnl"]
     )
 
 
