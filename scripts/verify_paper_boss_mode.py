@@ -72,6 +72,7 @@ def main() -> None:
         check("used margin after open", metrics["used_margin"] == 20)
         check("available funds after open", metrics["available_funds"] == 80)
         check("open boss telegram sent", len(sent_messages) == 1 and "模拟账户本金：$100.00" in sent_messages[-1])
+        check("open margin label clarified", "账户保证金总占用：$20.00" in sent_messages[-1] and "当前保证金占用：" not in sent_messages[-1])
 
         update_open_paper_trades(db, {"ZRO": "0.95"})
         db.refresh(trade)
@@ -93,6 +94,9 @@ def main() -> None:
         metrics = paper_account_metrics(db)
         check("add increases used margin", trade.size_usd == 40 and metrics["used_margin"] == 60)
         check("add boss telegram sent", any("模拟盘加仓" in message for message in sent_messages))
+        add_message = sent_messages[-1]
+        check("add position margin label dynamic", "ZRO仓位保证金：$40.00" in add_message and "当前剩余保证金：" not in add_message)
+        check("add account margin label", "账户保证金总占用：$60.00" in add_message)
 
         reduce_signal = _signal(db, wallet.id, "ZRO", "reduce", "long", 1.2, 4, cutover)
         process_new_signals_for_paper_trading(db, cutover_at=cutover)
