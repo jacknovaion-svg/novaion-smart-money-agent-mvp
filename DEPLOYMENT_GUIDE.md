@@ -53,6 +53,49 @@ Open:
 - Web: `http://localhost:5173`
 - API Docs: `http://localhost:8000/docs`
 
+## Ubuntu Production Paths
+
+The Ubuntu deployment uses the dedicated 1TB data disk mounted at `/mnt/novaion-data`.
+
+```text
+Code:        /home/jack/novaion/projects/novaion-smart-money-agent-mvp
+Database:    /mnt/novaion-data/data/smart-money-agent/novaion.db
+Logs:        /mnt/novaion-data/logs/smart-money-agent
+Backups:     /mnt/novaion-data/backups/smart-money-agent
+Docker root: /mnt/novaion-data/docker
+```
+
+Docker Compose maps the host database directory into the API container:
+
+```text
+/mnt/novaion-data/data/smart-money-agent -> /app/data
+```
+
+The API container must use:
+
+```env
+DATABASE_URL=sqlite:////app/data/novaion.db
+```
+
+Do not hardcode Ubuntu host paths inside Python application code. Host paths belong only in deployment configuration and server environment setup.
+
+## Frontend API Routing
+
+Production uses same-origin API routing:
+
+- Browser calls `/api/...`
+- The web container Nginx proxies `/api/...` to `http://api:8000/api/...`
+- The web container Nginx proxies `/health` to `http://api:8000/health`
+
+This avoids building the frontend with `http://localhost:8000`, which would point to the visitor's own machine in production.
+
+For Mac/local Vite development, set a local API base URL explicitly:
+
+```bash
+cd apps/web
+VITE_API_BASE_URL=http://127.0.0.1:8010 pnpm dev
+```
+
 ## Local No-Docker Start
 
 API:
