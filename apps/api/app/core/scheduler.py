@@ -7,7 +7,7 @@ from app.services.ops_service import run_with_task_lock
 from app.services.paper_trading_processor import process_new_signals_for_paper_trading, update_open_paper_trades
 from app.services.quality_service import generate_daily_report, update_signal_performance
 from app.services.system_log_service import write_log
-from app.services.telegram_service import send_ops_alert
+from app.services.telegram_service import flush_signal_aggregation_notifications, send_ops_alert
 from app.services.wallet_sync_service import recalculate_enabled_wallet_metrics, sync_enabled_hyperliquid_wallets
 
 
@@ -150,7 +150,8 @@ def _paper_trade_update_job() -> None:
         def task():
             signal_result = process_new_signals_for_paper_trading(db)
             mark_result = update_open_paper_trades(db)
-            payload = {"signals": signal_result, "marks": mark_result}
+            aggregation_sent = flush_signal_aggregation_notifications(db)
+            payload = {"signals": signal_result, "marks": mark_result, "smart_money_aggregations_sent": aggregation_sent}
             write_log(db, level="info", module="paper_trading", message="Paper trade update completed", payload=payload)
             return payload
 

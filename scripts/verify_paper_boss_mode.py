@@ -182,7 +182,8 @@ def main() -> None:
         smart_signal = _signal(db, wallet.id, "SOL", "open", "long", 100.0, 12, cutover)
         before_signal_send = len(sent_messages)
         send_signal_notification(db, smart_signal, wallet)
-        check("original signal notification unaffected", len(sent_messages) == before_signal_send + 1 and "NOVAION Smart Money Signal" in sent_messages[-1])
+        check("smart money signal simplified", len(sent_messages) == before_signal_send + 1 and "【聪明钱新开仓】" in sent_messages[-1])
+        check("smart money signal hides technical fields", "signal_id" not in sent_messages[-1] and "Only simulate" not in sent_messages[-1])
 
         check("boss conclusion error", boss_conclusion(metrics, failed_count=1, core_error=True) == "模拟盘运行异常，需要技术检查。")
         sample_metrics = {**metrics, "closed_trades": 1, "account_return_pct": 10}
