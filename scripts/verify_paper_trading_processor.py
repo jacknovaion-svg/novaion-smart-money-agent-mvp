@@ -17,6 +17,7 @@ def main() -> None:
         db_path.unlink()
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     os.environ["SCHEDULER_ENABLED"] = "false"
+    os.environ["PAPER_ACCOUNT_STARTING_BALANCE_USD"] = "2000"
     os.environ["PAPER_MAX_POSITION_USD"] = "50"
     os.environ["PAPER_TAKER_FEE_RATE"] = "0.0005"
     os.environ["PAPER_SLIPPAGE_RATE"] = "0.001"

@@ -33,6 +33,7 @@ def main() -> None:
     from app.models.wallet import Wallet
     from app.services import paper_trading_telegram_service, telegram_service
     from app.services.paper_account_service import boss_conclusion, paper_account_metrics, trade_margin_return_pct
+    from app.services.paper_trading_service import add_signal_to_paper
     from app.services.paper_trading_processor import process_new_signals_for_paper_trading, update_open_paper_trades
     from app.services.paper_trading_telegram_service import paper_daily_boss_summary_message
     from app.services.telegram_service import send_signal_notification
@@ -125,12 +126,30 @@ def main() -> None:
         get_settings.cache_clear()
         tiny_cutover = datetime.now(timezone.utc)
         tiny_open = _signal(tiny_db, tiny_wallet.id, "ARB", "open", "long", 2.0, 1, tiny_cutover)
+        tiny_second_open = _signal(tiny_db, tiny_wallet.id, "OP", "open", "long", 3.0, 2, tiny_cutover + timedelta(seconds=1))
         process_new_signals_for_paper_trading(tiny_db, cutover_at=tiny_cutover)
+        tiny_second_trade = tiny_db.query(PaperTrade).filter(PaperTrade.signal_id == tiny_second_open.id).first()
+        check("same batch second open uses updated funds", tiny_open.status == "simulated" and tiny_second_open.status == "ignored" and tiny_second_trade is None)
         tiny_add = _signal(tiny_db, tiny_wallet.id, "ARB", "add", "long", 2.1, 2, tiny_cutover)
         process_new_signals_for_paper_trading(tiny_db, cutover_at=tiny_cutover)
         tiny_trade = tiny_db.query(PaperTrade).filter(PaperTrade.signal_id == tiny_open.id).first()
         tiny_log = tiny_db.query(SystemLog).filter(SystemLog.message == "insufficient_paper_funds").first()
         check("insufficient add ignored", tiny_add.status == "ignored" and tiny_trade.size_usd == 20 and tiny_log is not None)
+        manual_signal = _signal(tiny_db, tiny_wallet.id, "ATOM", "open", "long", 10, 3, tiny_cutover + timedelta(seconds=2))
+        try:
+            add_signal_to_paper(tiny_db, manual_signal)
+        except ValueError:
+            pass
+        manual_trade = tiny_db.query(PaperTrade).filter(PaperTrade.signal_id == manual_signal.id).first()
+        check("manual simulate cannot bypass funds", manual_signal.status == "ignored" and manual_trade is None)
+        reduce_signal = _signal(tiny_db, tiny_wallet.id, "ARB", "reduce", "long", 2.2, 4, tiny_cutover + timedelta(seconds=3))
+        process_new_signals_for_paper_trading(tiny_db, cutover_at=tiny_cutover)
+        tiny_db.refresh(tiny_trade)
+        check("negative funds still allow reduce", reduce_signal.status == "simulated" and tiny_trade.size_usd == 10)
+        close_signal = _signal(tiny_db, tiny_wallet.id, "ARB", "close", "long", 2.3, 5, tiny_cutover + timedelta(seconds=4))
+        process_new_signals_for_paper_trading(tiny_db, cutover_at=tiny_cutover)
+        tiny_db.refresh(tiny_trade)
+        check("negative funds still allow close", close_signal.status == "simulated" and tiny_trade.status == "closed")
         tiny_db.close()
         os.environ["PAPER_ACCOUNT_STARTING_BALANCE_USD"] = "100"
         get_settings.cache_clear()

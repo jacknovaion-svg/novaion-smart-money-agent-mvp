@@ -120,6 +120,7 @@ def paper_daily_boss_summary_message(db: Session, report_date: str | None = None
             f"当前账户余额：{_money(metrics['account_balance'])}",
             f"当前账户权益：{_money(metrics['account_equity'])}",
             f"当前可用资金：{_money(metrics['available_funds'])}",
+            *_funding_status_lines(metrics),
             f"当前保证金占用：{_money(metrics['used_margin'])}",
             f"账户累计收益率：{_pct(metrics['account_return_pct'])}",
             "",
@@ -162,6 +163,7 @@ def _open_message(title: str, trade: PaperTrade, signal: Signal, wallet: Wallet 
             f"本次开仓投入：{_money(trade.size_usd)}",
             f"账户保证金总占用：{_money(metrics['used_margin'])}",
             f"当前可用资金：{_money(metrics['available_funds'])}",
+            *_funding_status_lines(metrics),
             "",
             f"使用杠杆：{_leverage(trade.leverage)}倍",
             f"实际模拟仓位：{_money(trade_notional(trade))}",
@@ -188,6 +190,7 @@ def _add_message(title: str, trade: PaperTrade, wallet: Wallet | None, metrics: 
             f"{trade.symbol}仓位保证金：{_money(trade.size_usd)}",
             f"账户保证金总占用：{_money(metrics['used_margin'])}",
             f"当前可用资金：{_money(metrics['available_funds'])}",
+            *_funding_status_lines(metrics),
             "",
             f"使用杠杆：{_leverage(trade.leverage)}倍",
             f"当前实际模拟仓位：{_money(trade_notional(trade))}",
@@ -214,6 +217,7 @@ def _reduce_message(title: str, trade: PaperTrade, wallet: Wallet | None, metric
             f"当前剩余保证金：{_money(trade.size_usd)}",
             f"当前预计净浮动盈亏：{_money(trade.unrealized_pnl)}",
             f"当前可用资金：{_money(metrics['available_funds'])}",
+            *_funding_status_lines(metrics),
             f"来源钱包：{_wallet_label(wallet)}",
             "",
             "剩余状态：继续持有",
@@ -246,6 +250,7 @@ def _close_message(title: str, trade: PaperTrade, wallet: Wallet | None, metrics
             f"当前账户余额：{_money(metrics['account_balance'])}",
             f"当前账户权益：{_money(metrics['account_equity'])}",
             f"当前可用资金：{_money(metrics['available_funds'])}",
+            *_funding_status_lines(metrics),
             f"账户累计收益率：{_pct(metrics['account_return_pct'])}",
             f"来源钱包：{_wallet_label(wallet)}",
             "",
@@ -279,6 +284,16 @@ def _send_text(db: Session, text: str, payload: dict[str, Any]) -> bool:
 
 def _count_logs(logs: list[SystemLog], action: str) -> int:
     return len([log for log in logs if log.message == action])
+
+
+def _funding_status_lines(metrics: dict[str, Any]) -> list[str]:
+    if metrics.get("available_funds_raw", 0) >= 0:
+        return []
+    return [
+        "账户资金状态：保证金超额占用",
+        f"超额占用金额：{_money(metrics.get('over_margin_amount'))}",
+        f"保证金占用率：{_pct(metrics.get('margin_utilization_pct'))}",
+    ]
 
 
 def _trade_title(trade: PaperTrade) -> str:

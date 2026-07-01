@@ -18,7 +18,7 @@ from app.services.paper_trading_service import (
     close_paper_trade,
     unrealized_pnl_for_price,
 )
-from app.services.paper_account_service import paper_account_metrics
+from app.services.paper_account_service import paper_funds_check, requested_paper_margin
 from app.services.paper_trading_telegram_service import send_paper_trade_boss_notification
 from app.services.system_log_service import write_log
 
@@ -255,6 +255,10 @@ def _process_open(db: Session, signal: Signal) -> dict[str, Any]:
     existing = _open_trade(db, signal.wallet_id, signal.symbol, side)
     if existing:
         return _ignore_signal(db, signal, "duplicate_open", paper_trade_id=existing.id)
+    requested_margin = requested_paper_margin(signal.suggested_size_usd)
+    funds = paper_funds_check(db, requested_margin)
+    if not funds["allowed"]:
+        return _ignore_signal(db, signal, "insufficient_paper_funds", funds)
     trade = add_signal_to_paper(db, signal)
     _log_action(db, signal, "paper_opened", {"paper_trade_id": trade.id}, paper_trade_id=trade.id)
     send_paper_trade_boss_notification(db, event_type="open", trade=trade, signal=signal)
@@ -269,18 +273,16 @@ def _process_add(db: Session, signal: Signal) -> dict[str, Any]:
     if not trade:
         return _ignore_signal(db, signal, "orphan_add")
 
-    settings = get_settings()
-    capacity = max(settings.paper_max_position_usd - (trade.size_usd or 0), 0)
-    add_size = min(signal.suggested_size_usd or 0, capacity)
+    add_size = requested_paper_margin(signal.suggested_size_usd, current_position_size_usd=trade.size_usd or 0)
     if add_size <= 0:
         return _ignore_signal(db, signal, "zero_size", {"reason": "max_position_reached"}, paper_trade_id=trade.id)
-    metrics = paper_account_metrics(db)
-    if metrics["available_funds_raw"] < add_size:
+    funds = paper_funds_check(db, add_size)
+    if not funds["allowed"]:
         return _ignore_signal(
             db,
             signal,
             "insufficient_paper_funds",
-            {"requested_add_margin": add_size, "available_funds": metrics["available_funds_raw"]},
+            funds,
             paper_trade_id=trade.id,
         )
 

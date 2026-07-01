@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.signal import PaperTrade, Signal
 from app.models.wallet import Wallet
 from app.core.config import get_settings
+from app.services.paper_account_service import paper_funds_check, requested_paper_margin
 from app.services.system_log_service import write_log
 
 
@@ -37,7 +38,27 @@ def add_signal_to_paper(db: Session, signal: Signal) -> PaperTrade:
         return existing
 
     leverage = _paper_leverage(signal.source_leverage)
-    size_usd = min(signal.suggested_size_usd or DEFAULT_SIZE_USD, get_settings().paper_max_position_usd)
+    size_usd = requested_paper_margin(signal.suggested_size_usd)
+    funds = paper_funds_check(db, size_usd)
+    if not funds["allowed"]:
+        signal.status = "ignored"
+        db.add(signal)
+        db.commit()
+        write_log(
+            db,
+            level="info",
+            module="paper_trading",
+            message="insufficient_paper_funds",
+            payload={
+                "signal_id": signal.id,
+                "wallet_id": signal.wallet_id,
+                "symbol": signal.symbol,
+                "action": "insufficient_paper_funds",
+                "paper_trade_id": None,
+                **funds,
+            },
+        )
+        raise ValueError("Insufficient paper funds")
     raw_price = signal.current_price or signal.source_entry_price
     if raw_price <= 0:
         raise ValueError("Signal has no usable price")
