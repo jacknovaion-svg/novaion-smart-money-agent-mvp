@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.market_data import WalletPositionSnapshot
 from app.models.signal import PaperTrade
 from app.models.signal import Signal
 from app.models.system_log import SystemLog
@@ -262,13 +263,13 @@ def _format_boss_signal_message(db: Session, signal: Signal, wallet: Wallet) -> 
 
 
 def _format_aggregation_message(db: Session, signals: list[Signal], wallet: Wallet) -> str:
+    signals = sorted(signals, key=lambda signal: (signal.created_at, signal.id))
     first = signals[0]
     add_count = len([signal for signal in signals if signal.signal_type == "add"])
     reduce_count = len([signal for signal in signals if signal.signal_type == "reduce"])
-    first_size = signals[0].source_size or 0
-    last_size = signals[-1].source_size or 0
     action = _aggregate_system_action(db, signals)
     side = _position_side(first)
+    position_lines = _aggregation_position_lines(db, signals, side)
     conclusion = _aggregate_conclusion(side, add_count, reduce_count)
     return "\n".join(
         [
@@ -283,7 +284,7 @@ def _format_aggregation_message(db: Session, signals: list[Signal], wallet: Wall
             f"减仓：{reduce_count}次",
             "",
             "源钱包仓位：",
-            f"{_money(first_size)} → {_money(last_size)}",
+            *position_lines,
             "",
             "系统模拟动作：",
             action,
@@ -585,6 +586,131 @@ def _aggregate_system_action(db: Session, signals: list[Signal]) -> str:
     return "未触发模拟动作，已记录到每日汇总"
 
 
+def _aggregation_position_lines(db: Session, signals: list[Signal], side: str) -> list[str]:
+    first = signals[0]
+    last = signals[-1]
+    before = _position_before_signal(db, first, side)
+    after = _position_from_signal(db, last, side)
+    if not after:
+        return ["缺少仓位数据，无法可靠展示前后变化"]
+    if not before:
+        return [
+            f"当前仓位约 {_money(after['value'])}",
+            "本次动作为仓位调整，但缺少窗口开始仓位快照",
+        ]
+
+    value_delta = after["value"] - before["value"]
+    value_pct = (value_delta / before["value"] * 100) if before["value"] else 0
+    quantity_delta = after["quantity"] - before["quantity"]
+    direction = "增加" if value_delta > 0 else "减少"
+    if abs(value_delta) < 0.01:
+        return [
+            f"数量：{_quantity(before['quantity'])} → {_quantity(after['quantity'])} {first.symbol}",
+            f"价值：{_money(before['value'])} → {_money(after['value'])}",
+            f"仓位小幅{direction}，金额变化小于 $0.01",
+        ]
+    return [
+        f"数量：{_quantity(before['quantity'])} → {_quantity(after['quantity'])} {first.symbol}",
+        f"价值：{_money(before['value'])} → {_money(after['value'])}",
+        f"变化：{_money(value_delta)}（{value_pct:+.2f}%）",
+    ]
+
+
+def _position_before_signal(db: Session, signal: Signal, side: str) -> dict[str, float] | None:
+    snapshot_position = _snapshot_position_before(db, signal, side)
+    if snapshot_position:
+        return snapshot_position
+    previous = (
+        db.query(Signal)
+        .filter(Signal.wallet_id == signal.wallet_id)
+        .filter(Signal.symbol == signal.symbol)
+        .filter(Signal.side == side)
+        .filter(Signal.id != signal.id)
+        .filter(Signal.created_at < signal.created_at)
+        .order_by(Signal.created_at.desc(), Signal.id.desc())
+        .first()
+    )
+    if not previous:
+        return None
+    return _position_from_signal(db, previous, side)
+
+
+def _snapshot_position_before(db: Session, signal: Signal, side: str) -> dict[str, float] | None:
+    snapshots = (
+        db.query(WalletPositionSnapshot)
+        .filter(WalletPositionSnapshot.wallet_id == signal.wallet_id)
+        .filter(WalletPositionSnapshot.created_at < signal.created_at)
+        .order_by(WalletPositionSnapshot.created_at.desc(), WalletPositionSnapshot.id.desc())
+        .limit(20)
+        .all()
+    )
+    for snapshot in snapshots:
+        for position in _snapshot_positions(snapshot):
+            if str(position.get("coin")) != signal.symbol:
+                continue
+            position_side = str(position.get("side") or ("long" if _float(position.get("signed_size")) >= 0 else "short"))
+            if position_side != side:
+                continue
+            quantity = abs(_float(position.get("size") or position.get("signed_size")))
+            value = abs(_float(position.get("position_value")))
+            if value <= 0:
+                value = abs(quantity * _float(position.get("entry_price")))
+            return {"quantity": quantity, "value": value}
+    return None
+
+
+def _position_from_signal(db: Session, signal: Signal, side: str) -> dict[str, float] | None:
+    snapshot_position = _snapshot_position_for_signal(db, signal, side)
+    if snapshot_position:
+        return snapshot_position
+    if signal.side not in {side, "close"}:
+        return None
+    value = abs(_float(signal.source_size))
+    price = _float(signal.current_price or signal.source_entry_price)
+    quantity = abs(value / price) if price else 0
+    return {"quantity": quantity, "value": value}
+
+
+def _snapshot_position_for_signal(db: Session, signal: Signal, side: str) -> dict[str, float] | None:
+    snapshot_id = _snapshot_id_from_signal(signal)
+    if not snapshot_id:
+        return None
+    snapshot = db.query(WalletPositionSnapshot).filter(WalletPositionSnapshot.id == snapshot_id).first()
+    if not snapshot:
+        return None
+    for position in _snapshot_positions(snapshot):
+        if str(position.get("coin")) != signal.symbol:
+            continue
+        position_side = str(position.get("side") or ("long" if _float(position.get("signed_size")) >= 0 else "short"))
+        if position_side != side:
+            continue
+        quantity = abs(_float(position.get("size") or position.get("signed_size")))
+        value = abs(_float(position.get("position_value")))
+        if value <= 0:
+            value = abs(quantity * _float(position.get("entry_price")))
+        return {"quantity": quantity, "value": value}
+    return None
+
+
+def _snapshot_id_from_signal(signal: Signal) -> int | None:
+    for raw in (signal.dedupe_key, signal.source_trade_id):
+        parts = str(raw or "").split(":")
+        if len(parts) >= 2:
+            try:
+                return int(parts[1])
+            except ValueError:
+                continue
+    return None
+
+
+def _snapshot_positions(snapshot: WalletPositionSnapshot) -> list[dict[str, Any]]:
+    try:
+        positions = json.loads(snapshot.positions_json or "[]")
+    except Exception:
+        return []
+    return positions if isinstance(positions, list) else []
+
+
 def _latest_paper_log(db: Session, signal_id: int) -> SystemLog | None:
     pattern = f'"signal_id": {signal_id}'
     return (
@@ -683,6 +809,22 @@ def _money(value: Any) -> str:
         number = 0
     sign = "-" if number < 0 else ""
     return f"{sign}${abs(number):,.2f}"
+
+
+def _quantity(value: Any) -> str:
+    number = _float(value)
+    if abs(number) >= 100:
+        return f"{number:,.0f}"
+    if abs(number) >= 1:
+        return f"{number:,.4f}".rstrip("0").rstrip(".")
+    return f"{number:,.8f}".rstrip("0").rstrip(".")
+
+
+def _float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0
 
 
 def _price(value: Any) -> str:

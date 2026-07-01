@@ -27,6 +27,7 @@ def main() -> None:
     get_settings.cache_clear()
 
     from app.core.database import SessionLocal, init_db
+    from app.models.market_data import WalletPositionSnapshot
     from app.models.signal import DailyReport, PaperTrade, Signal
     from app.models.system_log import SystemLog
     from app.models.wallet import Wallet
@@ -106,6 +107,88 @@ def main() -> None:
         sent_count = flush_signal_aggregation_notifications(db, now=now)
         check("reduce aggregation sends one summary", sent_count == 1 and len(sent_messages) == before_reduce + 1)
         check("reduce conclusion", "信心减弱" in sent_messages[-1])
+        sent_again = flush_signal_aggregation_notifications(db, now=now)
+        check("aggregation does not resend", sent_again == 0)
+
+        wallet_two = _wallet(db, "0x955500000000000000000000000000000000cafe", "Parallel Wallet")
+        mega_time = now - timedelta(minutes=31)
+        _snapshot(db, wallet.id, mega_time - timedelta(seconds=1), [_position("MEGA", "long", 40000, 1832.08)])
+        mega_after = _snapshot(db, wallet.id, mega_time, [_position("MEGA", "long", 30000, 1393.68)])
+        mega_reduce = _signal(db, wallet.id, "MEGA", "reduce", "long", 1393.68, 0.046465, mega_time, snapshot_id=mega_after.id)
+        send_signal_notification(db, mega_reduce, wallet)
+        before_mega = len(sent_messages)
+        flush_signal_aggregation_notifications(db, now=now)
+        mega_message = sent_messages[-1]
+        check("single reduce shows before after value", len(sent_messages) == before_mega + 1 and "$1,832.08 → $1,393.68" in mega_message)
+        check("single reduce shows quantity", "40,000 → 30,000 MEGA" in mega_message)
+
+        doge_time = now - timedelta(minutes=31)
+        _snapshot(db, wallet.id, doge_time - timedelta(seconds=1), [_position("DOGE", "long", 1000, 100)])
+        doge_after = _snapshot(db, wallet.id, doge_time, [_position("DOGE", "long", 1000, 150)])
+        doge_add = _signal(db, wallet.id, "DOGE", "add", "long", 150, 0.15, doge_time, snapshot_id=doge_after.id)
+        send_signal_notification(db, doge_add, wallet)
+        before_doge = len(sent_messages)
+        flush_signal_aggregation_notifications(db, now=now)
+        check("single add shows before after value", len(sent_messages) == before_doge + 1 and "$100.00 → $150.00" in sent_messages[-1])
+
+        arb_add_time = now + timedelta(minutes=6)
+        _snapshot(db, wallet.id, arb_add_time - timedelta(seconds=1), [_position("ARB", "long", 100, 100)])
+        arb_add_snapshot = _snapshot(db, wallet.id, arb_add_time, [_position("ARB", "long", 100, 120)])
+        arb_add = _signal(db, wallet.id, "ARB", "add", "long", 120, 1.2, arb_add_time, snapshot_id=arb_add_snapshot.id)
+        arb_reduce_time = now + timedelta(minutes=6, seconds=1)
+        arb_reduce_snapshot = _snapshot(db, wallet.id, arb_reduce_time, [_position("ARB", "long", 100, 110)])
+        arb_reduce = _signal(db, wallet.id, "ARB", "reduce", "long", 110, 1.1, arb_reduce_time, snapshot_id=arb_reduce_snapshot.id)
+        send_signal_notification(db, arb_add, wallet)
+        send_signal_notification(db, arb_reduce, wallet)
+        before_mixed = len(sent_messages)
+        flush_signal_aggregation_notifications(db, now=arb_reduce_time + timedelta(minutes=31))
+        mixed_messages = sent_messages[before_mixed:]
+        check(
+            "add reduce mixed aggregates ordered",
+            len(mixed_messages) == 1 and any("$100.00 → $110.00" in message for message in mixed_messages),
+            json.dumps(mixed_messages, ensure_ascii=False),
+        )
+
+        tiny = _signal(db, wallet.id, "TINY", "reduce", "long", 10.004, 1, now - timedelta(minutes=31))
+        _snapshot(db, wallet.id, tiny.created_at - timedelta(seconds=1), [_position("TINY", "long", 10.009, 10.009)])
+        send_signal_notification(db, tiny, wallet)
+        before_tiny = len(sent_messages)
+        flush_signal_aggregation_notifications(db, now=now)
+        check("tiny delta message", len(sent_messages) == before_tiny + 1 and "金额变化小于 $0.01" in sent_messages[-1])
+
+        no_before = _signal(db, wallet.id, "NOBEFORE", "reduce", "long", 50, 5, now - timedelta(minutes=31))
+        send_signal_notification(db, no_before, wallet)
+        before_missing = len(sent_messages)
+        flush_signal_aggregation_notifications(db, now=now)
+        check("missing before degrades clearly", len(sent_messages) == before_missing + 1 and "缺少窗口开始仓位快照" in sent_messages[-1])
+
+        other_wallet_time = now - timedelta(minutes=31)
+        _snapshot(db, wallet_two.id, other_wallet_time - timedelta(seconds=1), [_position("MEGA", "long", 500, 25)])
+        other_wallet_after = _snapshot(db, wallet_two.id, other_wallet_time, [_position("MEGA", "long", 500, 30)])
+        other_wallet_signal = _signal(db, wallet_two.id, "MEGA", "add", "long", 30, 0.06, other_wallet_time, snapshot_id=other_wallet_after.id)
+        send_signal_notification(db, other_wallet_signal, wallet_two)
+        before_other_wallet = len(sent_messages)
+        flush_signal_aggregation_notifications(db, now=now)
+        check("parallel wallet does not mix", len(sent_messages) == before_other_wallet + 1 and "0x9555...cafe" in sent_messages[-1] and "$25.00 → $30.00" in sent_messages[-1])
+
+        multi_time = now + timedelta(minutes=7)
+        _snapshot(db, wallet.id, multi_time - timedelta(seconds=1), [_position("OP", "long", 100, 100), _position("APE", "long", 200, 200)])
+        multi_after = _snapshot(db, wallet.id, multi_time, [_position("OP", "long", 100, 120), _position("APE", "long", 200, 180)])
+        op_signal = _signal(db, wallet.id, "OP", "add", "long", 120, 1.2, multi_time, snapshot_id=multi_after.id)
+        ape_signal = _signal(db, wallet.id, "APE", "reduce", "long", 180, 0.9, multi_time, snapshot_id=multi_after.id)
+        send_signal_notification(db, op_signal, wallet)
+        send_signal_notification(db, ape_signal, wallet)
+        before_multi_symbol = len(sent_messages)
+        sent_multi = flush_signal_aggregation_notifications(db, now=multi_time + timedelta(minutes=31))
+        multi_symbol_messages = sent_messages[before_multi_symbol:]
+        check(
+            "parallel symbols do not mix",
+            sent_multi == 2
+            and len(multi_symbol_messages) == 2
+            and any("币种：OP" in message and "$100.00 → $120.00" in message for message in multi_symbol_messages)
+            and any("币种：APE" in message and "$200.00 → $180.00" in message for message in multi_symbol_messages),
+            json.dumps(multi_symbol_messages, ensure_ascii=False),
+        )
 
         close_signal = _signal(db, wallet.id, "ZRO", "close", "close", 0, 0.91, now + timedelta(seconds=1))
         write_log(
@@ -154,6 +237,7 @@ def main() -> None:
         db.refresh(fail_signal)
         fail_log = db.query(SystemLog).filter(SystemLog.message == "Signal notification failed").first()
         check("telegram failure isolated", result is False and fail_signal.status == before_fail_status and fail_log is not None)
+        check("paper trading unaffected by telegram display tests", db.query(PaperTrade).filter(PaperTrade.symbol == "ZRO").count() == 1)
 
         passed = len([item for item in tests if item["passed"]])
         output = {
@@ -185,9 +269,14 @@ def _wallet(db, address: str, name: str):
     return wallet
 
 
-def _signal(db, wallet_id: int, symbol: str, signal_type: str, side: str, source_size: float, price: float, created_at: datetime):
+def _signal(db, wallet_id: int, symbol: str, signal_type: str, side: str, source_size: float, price: float, created_at: datetime, snapshot_id=None):
     from app.models.signal import Signal
 
+    dedupe = (
+        f"{wallet_id}:{snapshot_id}:{symbol}:{signal_type}:{source_size}:{price}"
+        if snapshot_id
+        else f"noise-{wallet_id}-{symbol}-{signal_type}-{side}-{created_at.timestamp()}"
+    )
     signal = Signal(
         wallet_id=wallet_id,
         platform="hyperliquid",
@@ -204,14 +293,43 @@ def _signal(db, wallet_id: int, symbol: str, signal_type: str, side: str, source
         suggested_size_usd=20,
         reason="Wallet score 80, 30D win rate 60%, profit factor 1.4.",
         status="new",
-        source_trade_id=f"noise-{wallet_id}-{symbol}-{signal_type}-{side}-{created_at.timestamp()}",
-        dedupe_key=f"noise-{wallet_id}-{symbol}-{signal_type}-{side}-{created_at.timestamp()}",
+        source_trade_id=dedupe,
+        dedupe_key=dedupe,
         created_at=created_at,
     )
     db.add(signal)
     db.commit()
     db.refresh(signal)
     return signal
+
+
+def _snapshot(db, wallet_id: int, created_at: datetime, positions: list[dict]):
+    from app.models.market_data import WalletPositionSnapshot
+
+    snapshot = WalletPositionSnapshot(
+        wallet_id=wallet_id,
+        raw_json="{}",
+        positions_json=json.dumps(positions),
+        account_value=sum(position["position_value"] for position in positions),
+        unrealized_pnl=0,
+        created_at=created_at,
+    )
+    db.add(snapshot)
+    db.commit()
+    return snapshot
+
+
+def _position(symbol: str, side: str, size: float, value: float):
+    return {
+        "coin": symbol,
+        "side": side,
+        "size": size,
+        "signed_size": size if side == "long" else -size,
+        "entry_price": value / size if size else 0,
+        "position_value": value,
+        "unrealized_pnl": 0,
+        "leverage": 3,
+    }
 
 
 def _no_tech_fields(message: str) -> bool:
