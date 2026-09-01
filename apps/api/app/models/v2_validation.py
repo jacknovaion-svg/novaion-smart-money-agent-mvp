@@ -54,12 +54,41 @@ class ShadowTrade(Base):
     fees: Mapped[float] = mapped_column(Float, default=0)
     slippage_adjustment: Mapped[float] = mapped_column(Float, default=0)
     net_pnl: Mapped[float] = mapped_column(Float, default=0)
+    mark_price: Mapped[float] = mapped_column(Float, default=0)
+    unrealized_pnl: Mapped[float] = mapped_column(Float, default=0)
     status: Mapped[str] = mapped_column(String(16), default="open", index=True)
     quality_status: Mapped[str] = mapped_column(String(32), default="clean")
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class ShadowTradeAction(Base):
+    """One immutable audit row per post-cutover signal handled by Shadow Trading."""
+
+    __tablename__ = "shadow_trade_actions"
+    __table_args__ = (UniqueConstraint("signal_id", name="uq_shadow_trade_action_signal"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), index=True)
+    shadow_trade_id: Mapped[Optional[int]] = mapped_column(ForeignKey("shadow_trades.id"), nullable=True, index=True)
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(40), index=True)
+    side: Mapped[str] = mapped_column(String(16), default="long")
+    action_type: Mapped[str] = mapped_column(String(16), index=True)
+    size_usd: Mapped[float] = mapped_column(Float, default=0)
+    entry_price: Mapped[float] = mapped_column(Float, default=0)
+    exit_price: Mapped[float] = mapped_column(Float, default=0)
+    gross_pnl: Mapped[float] = mapped_column(Float, default=0)
+    fees: Mapped[float] = mapped_column(Float, default=0)
+    slippage_adjustment: Mapped[float] = mapped_column(Float, default=0)
+    net_pnl: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="processed")
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
 
 
 class PaperTradeAction(Base):

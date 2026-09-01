@@ -9,7 +9,7 @@ from app.models.market_data import (
     WalletPositionSnapshot,
 )
 from app.models.signal import DailyReport, PaperTrade, RiskRule, Signal, SignalPerformance
-from app.models.v2_validation import DataQualityEvent, EquitySnapshot, PaperTradeAction, ShadowTrade
+from app.models.v2_validation import DataQualityEvent, EquitySnapshot, PaperTradeAction, ShadowTrade, ShadowTradeAction
 
 __all__ = [
     "SystemLog",
@@ -30,4 +30,5 @@ __all__ = [
     "DataQualityEvent",
     "ShadowTrade",
     "PaperTradeAction",
+    "ShadowTradeAction",
 ]

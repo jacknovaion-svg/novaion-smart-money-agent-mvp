@@ -83,6 +83,10 @@ def _ensure_sqlite_columns() -> None:
             "unrealized_pnl_pct": "FLOAT DEFAULT 0",
             "updated_at": "DATETIME",
         },
+        "shadow_trades": {
+            "mark_price": "FLOAT DEFAULT 0",
+            "unrealized_pnl": "FLOAT DEFAULT 0",
+        },
     }
     with engine.begin() as connection:
         for table, columns in table_columns.items():
