@@ -36,9 +36,15 @@ class Settings(BaseSettings):
     smart_max_single_loss_pct: float = 0.30
     smart_soft_watch_min_gross_profit: float = 1000
     smart_soft_watch_min_trade_count_30d: int = 20
+    smart_money_telegram_boss_mode: bool = True
+    smart_money_telegram_aggregation_minutes: int = 30
     alert_cooldown_minutes: int = 60
+    paper_account_starting_balance_usd: float = 100
+    paper_trading_telegram_boss_mode: bool = True
     paper_taker_fee_rate: float = 0.0005
     paper_slippage_rate: float = 0.001
+    paper_max_position_usd: float = 50
+    paper_trading_cutover_at: str = ""
     task_lock_stale_minutes: int = 30
     validation_mode: bool = True
     validation_days: int = 7

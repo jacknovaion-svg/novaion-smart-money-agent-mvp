@@ -4,17 +4,26 @@ services:
       context: ./apps/api
     env_file:
       - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/novaion.db
+      ENABLE_LIVE_TRADING: "false"
+      REQUIRE_MANUAL_APPROVAL: "true"
+      EMERGENCY_STOP: "true"
+      VALIDATION_MODE: "true"
+      DISCOVERY_AUTO_ADD_ENABLED: "false"
     volumes:
-      - ./data:/app/data
+      - /mnt/novaion-data/data/smart-money-agent:/app/data
     ports:
       - "8000:8000"
+    restart: unless-stopped
 
   web:
     build:
       context: ./apps/web
       args:
-        VITE_API_BASE_URL: http://localhost:8000
+        VITE_API_BASE_URL: ""
     ports:
       - "5173:80"
     depends_on:
       - api
+    restart: unless-stopped

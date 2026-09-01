@@ -78,6 +78,10 @@ def _ensure_sqlite_columns() -> None:
             "fees": "FLOAT DEFAULT 0",
             "slippage_adjustment": "FLOAT DEFAULT 0",
             "net_pnl": "FLOAT DEFAULT 0",
+            "mark_price": "FLOAT DEFAULT 0",
+            "unrealized_pnl": "FLOAT DEFAULT 0",
+            "unrealized_pnl_pct": "FLOAT DEFAULT 0",
+            "updated_at": "DATETIME",
         },
     }
     with engine.begin() as connection:

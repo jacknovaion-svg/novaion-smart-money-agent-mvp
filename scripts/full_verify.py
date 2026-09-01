@@ -9,7 +9,13 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 
 def main():
-    os.environ.setdefault("DATABASE_URL", "sqlite:///./data/novaion_full_verify.db")
+    verify_db = ROOT / "data" / "novaion_full_verify.db"
+    verify_db.parent.mkdir(parents=True, exist_ok=True)
+    for path in (verify_db, verify_db.with_suffix(".db-wal"), verify_db.with_suffix(".db-shm")):
+        if path.exists():
+            path.unlink()
+
+    os.environ["DATABASE_URL"] = f"sqlite:///{verify_db}"
     os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
     from app.core.database import SessionLocal, init_db

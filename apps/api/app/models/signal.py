@@ -55,10 +55,18 @@ class PaperTrade(Base):
     fees: Mapped[float] = mapped_column(Float, default=0)
     slippage_adjustment: Mapped[float] = mapped_column(Float, default=0)
     net_pnl: Mapped[float] = mapped_column(Float, default=0)
+    mark_price: Mapped[float] = mapped_column(Float, default=0)
+    unrealized_pnl: Mapped[float] = mapped_column(Float, default=0)
+    unrealized_pnl_pct: Mapped[float] = mapped_column(Float, default=0)
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class SignalPerformance(Base):
