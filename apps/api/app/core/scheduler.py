@@ -7,6 +7,7 @@ from app.services.ops_service import run_with_task_lock
 from app.services.paper_trading_processor import process_new_signals_for_paper_trading, update_open_paper_trades
 from app.services.quality_service import generate_daily_report, update_signal_performance
 from app.services.system_log_service import write_log
+from app.services.v2_validation_service import record_equity_snapshot
 from app.services.telegram_service import flush_signal_aggregation_notifications, send_ops_alert
 from app.services.wallet_sync_service import recalculate_enabled_wallet_metrics, sync_enabled_hyperliquid_wallets
 
@@ -47,6 +48,8 @@ def start_scheduler() -> None:
         scheduler.add_job(_discovery_job, "interval", hours=8, id="wallet_discovery", replace_existing=True, max_instances=1)
         scheduler.add_job(_paper_trade_update_job, "interval", minutes=15, id="paper_trade_update", replace_existing=True, max_instances=1)
         scheduler.add_job(_health_report_job, "cron", hour=20, minute=0, id="health_report", replace_existing=True, max_instances=1)
+        if settings.v2_alpha_validation_enabled:
+            scheduler.add_job(_v2_equity_snapshot_job, "interval", minutes=15, id="v2_equity_snapshot", replace_existing=True, max_instances=1)
     else:
         scheduler.add_job(_discovery_job, "cron", hour=2, minute=15, id="wallet_discovery", replace_existing=True, max_instances=1)
     scheduler.start()
@@ -174,5 +177,15 @@ def _health_report_job() -> None:
     except Exception as exc:
         write_log(db, level="error", module="scheduler", message="Health report failed", payload={"error": str(exc)})
         send_ops_alert(db, "Database Error", str(exc), {"job": "health_report"})
+    finally:
+        db.close()
+
+
+def _v2_equity_snapshot_job() -> None:
+    db = SessionLocal()
+    try:
+        run_with_task_lock(db, "v2_equity_snapshot", lambda: record_equity_snapshot(db))
+    except Exception as exc:
+        write_log(db, level="error", module="v2_validation", message="Equity snapshot failed", payload={"error": str(exc)})
     finally:
         db.close()

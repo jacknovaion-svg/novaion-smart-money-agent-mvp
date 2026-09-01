@@ -21,6 +21,7 @@ from app.services.paper_trading_service import (
 from app.services.paper_account_service import paper_funds_check, requested_paper_margin
 from app.services.paper_trading_telegram_service import send_paper_trade_boss_notification
 from app.services.system_log_service import write_log
+from app.services.v2_validation_service import record_paper_trade_action
 
 
 SIMULATION_RULE_VERSION = "paper_v1"
@@ -353,6 +354,10 @@ def _process_reduce(db: Session, signal: Signal) -> dict[str, Any]:
             "reduced_size_usd": reduce_size,
             "remaining_size_usd": trade.size_usd,
             "realized_pnl": realized["net_pnl"],
+            "gross_pnl": realized["raw_pnl"],
+            "fees": realized["fees"],
+            "slippage_adjustment": realized["slippage_adjustment"],
+            "net_pnl": realized["net_pnl"],
             "simulation_rule_version": SIMULATION_RULE_VERSION,
             "reduce_rule": "fixed_50_percent",
         },
@@ -383,10 +388,17 @@ def _process_close(db: Session, signal: Signal) -> dict[str, Any]:
     if len(trades) > 1:
         return _ignore_signal(db, signal, "ambiguous_close")
 
+    existing_net_pnl = trades[0].net_pnl or trades[0].pnl or 0
     trade = close_paper_trade(db, trades[0], _signal_price(signal))
     signal.status = "simulated"
     db.commit()
-    _log_action(db, signal, "paper_closed", {"paper_trade_id": trade.id, "realized_pnl": trade.pnl}, paper_trade_id=trade.id)
+    _log_action(
+        db,
+        signal,
+        "paper_closed",
+        {"paper_trade_id": trade.id, "realized_pnl": round((trade.net_pnl or 0) - existing_net_pnl, 6), "net_pnl": round((trade.net_pnl or 0) - existing_net_pnl, 6)},
+        paper_trade_id=trade.id,
+    )
     send_paper_trade_boss_notification(db, event_type="close", trade=trade, signal=signal)
     return {"status": "simulated", "action": "paper_closed", "paper_trade_id": trade.id}
 
@@ -424,6 +436,9 @@ def _log_action(
     }
     body.update(payload or {})
     write_log(db, level=level, module="paper_trading", message=action, payload=body)
+    if action in {"paper_opened", "paper_added", "paper_reduced", "paper_closed"}:
+        trade = db.query(PaperTrade).filter(PaperTrade.id == paper_trade_id).first() if paper_trade_id else None
+        record_paper_trade_action(db, signal=signal, action_type=signal.signal_type, paper_trade=trade, payload=body)
 
 
 def _log_trade_event(

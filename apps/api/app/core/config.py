@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     task_lock_stale_minutes: int = 30
     validation_mode: bool = True
     validation_days: int = 7
+    shadow_trading_enabled: bool = False
+    v2_alpha_validation_enabled: bool = False
 
     enable_live_trading: bool = False
     require_manual_approval: bool = True
