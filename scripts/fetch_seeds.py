@@ -52,7 +52,7 @@ def main():
     output.write_text("\n".join(item["address"] for item in selected) + ("\n" if selected else ""), encoding="utf-8")
 
     report = {
-        "found_count": len(all_records),
+        "found_count": len(all_records) + invalid_count,
         "valid_count": len(all_records),
         "invalid_count": invalid_count,
         "duplicate_count": max(len(all_records) - len(ranked), 0),

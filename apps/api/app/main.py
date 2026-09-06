@@ -24,6 +24,14 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    if settings.v3_enabled:
+        from app.services.v3_shadow import ensure_run, snapshot, atomic, now_utc
+        from app.models.v3 import V3Equity
+        with SessionLocal() as db:
+            run = ensure_run(db)
+            if not db.query(V3Equity.id).filter_by(run_id=run.id).first():
+                with atomic(db):
+                    snapshot(db, run, now_utc())
     start_scheduler()
     db = SessionLocal()
     try:

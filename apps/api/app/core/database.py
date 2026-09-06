@@ -42,7 +42,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import discovery, market_data, ops, signal, system_log, v2_validation, wallet  # noqa: F401
+    from app.models import discovery, market_data, ops, signal, system_log, v2_validation, v3, wallet  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_sqlite_columns()

@@ -164,6 +164,8 @@ def record_paper_trade_action(
 
 def create_shadow_trade(db: Session, signal: Signal) -> ShadowTrade:
     settings = get_settings()
+    if settings.v3_enabled:
+        raise ValueError("Legacy Shadow writes are disabled during V3")
     if not settings.v2_alpha_validation_enabled or not settings.shadow_trading_enabled:
         raise ValueError("Shadow Trading is disabled")
     if not settings.validation_mode:
@@ -200,6 +202,8 @@ def process_new_signals_for_shadow(db: Session) -> dict[str, int]:
     """Process only post-cutover signals, one committed action at a time."""
     settings = get_settings()
     result = {"processed": 0, "ignored": 0, "failed": 0, "opened": 0, "added": 0, "reduced": 0, "closed": 0}
+    if settings.v3_enabled:
+        return result
     if not settings.v2_alpha_validation_enabled or not settings.shadow_trading_enabled or not settings.validation_mode:
         return result
     cutover = _parse_cutover(settings.paper_trading_cutover_at)

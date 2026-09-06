@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from app.core.config import get_settings
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/v2-validation", tags=["v2-validation"])
 
 @router.post("/equity-snapshots")
 def create_equity_snapshot(db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    _legacy_write_guard()
     row = record_equity_snapshot(db)
     return {"id": row.id, "captured_at": row.captured_at, "equity": row.equity}
 
@@ -44,6 +46,7 @@ def get_shadow_summary(db: Session = Depends(get_db), _user: CurrentUser = Depen
 
 @router.post("/shadow-trades/{signal_id}")
 def open_shadow_trade(signal_id: int, db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    _legacy_write_guard()
     signal = db.query(Signal).filter(Signal.id == signal_id).first()
     if not signal:
         return {"detail": "Signal not found"}
@@ -58,8 +61,14 @@ def close_shadow_trade_endpoint(
     db: Session = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ):
+    _legacy_write_guard()
     trade = db.query(ShadowTrade).filter(ShadowTrade.id == trade_id).first()
     if not trade:
         return {"detail": "Shadow trade not found"}
     closed = close_shadow_trade(db, trade, float(payload.get("exit_price", 0)))
     return {"id": closed.id, "status": closed.status, "net_pnl": closed.net_pnl}
+
+
+def _legacy_write_guard():
+    if get_settings().v3_enabled:
+        raise HTTPException(status_code=409, detail="V2 Shadow is archived; V3 is forward-only and scheduler-owned")

@@ -48,7 +48,10 @@ def start_scheduler() -> None:
         scheduler.add_job(_discovery_job, "interval", hours=8, id="wallet_discovery", replace_existing=True, max_instances=1)
         scheduler.add_job(_paper_trade_update_job, "interval", minutes=15, id="paper_trade_update", replace_existing=True, max_instances=1)
         scheduler.add_job(_health_report_job, "cron", hour=20, minute=0, id="health_report", replace_existing=True, max_instances=1)
-        if settings.v2_alpha_validation_enabled:
+        if settings.v3_enabled:
+            scheduler.add_job(_v3_job, "interval", minutes=5, id="v3_shadow_processor", replace_existing=True, max_instances=1, coalesce=True)
+            scheduler.add_job(_v3_discovery_job, "cron", hour=1, minute=30, id="v3_seed_discovery", replace_existing=True, max_instances=1)
+        elif settings.v2_alpha_validation_enabled:
             scheduler.add_job(_v2_equity_snapshot_job, "interval", minutes=15, id="v2_equity_snapshot", replace_existing=True, max_instances=1)
             if settings.shadow_trading_enabled:
                 scheduler.add_job(_shadow_trade_job, "interval", minutes=5, id="v2_shadow_trade_processor", replace_existing=True, max_instances=1)
@@ -184,6 +187,8 @@ def _health_report_job() -> None:
 
 
 def _v2_equity_snapshot_job() -> None:
+    if get_settings().v3_enabled:
+        return
     db = SessionLocal()
     try:
         run_with_task_lock(db, "v2_equity_snapshot", lambda: record_equity_snapshot(db))
@@ -194,6 +199,8 @@ def _v2_equity_snapshot_job() -> None:
 
 
 def _shadow_trade_job() -> None:
+    if get_settings().v3_enabled:
+        return
     db = SessionLocal()
     try:
         def task():
@@ -208,3 +215,17 @@ def _shadow_trade_job() -> None:
         write_log(db, level="error", module="v2_shadow", message="Shadow trade processing failed", payload={"error": str(exc)})
     finally:
         db.close()
+
+
+def _v3_job() -> None:
+    from app.services.v3_runtime import cycle
+    try:
+        cycle()
+    except Exception as exc:
+        with SessionLocal() as db:
+            write_log(db, level="error", module="v3_shadow", message="V3 worker failed", payload={"exception": type(exc).__name__})
+
+
+def _v3_discovery_job() -> None:
+    from app.services.v3_runtime import discover
+    discover()

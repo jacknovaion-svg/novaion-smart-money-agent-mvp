@@ -1,4 +1,5 @@
 import time
+import threading
 from typing import Any, Dict
 
 import httpx
@@ -7,6 +8,19 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.services.system_log_service import write_log
 from app.services.ops_service import record_hyperliquid_metric
+
+_request_queue = threading.Lock()
+_next_request_at = 0.0
+
+
+def _v3_request_slot(weight, minimum_interval):
+    global _next_request_at
+    # A bounded process-local queue shared by all info clients, including retries.
+    with _request_queue:
+        delay = _next_request_at - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        _next_request_at = time.monotonic() + max(minimum_interval, weight * 0.06)
 
 
 class HyperliquidApiClient:
@@ -17,10 +31,13 @@ class HyperliquidApiClient:
         self._last_request_at = 0.0
 
     def post_info(self, payload: Dict[str, Any], *, weight: int = 20) -> Any:
-        self._rate_limit(weight)
+        if not self.settings.v3_enabled:
+            self._rate_limit(weight)
         request_type = payload.get("type", "unknown")
         last_error = ""
         for attempt in range(1, 4):
+            if self.settings.v3_enabled:
+                _v3_request_slot(weight, self.settings.v3_request_interval_seconds)
             started = time.monotonic()
             try:
                 with httpx.Client(timeout=15) as client:

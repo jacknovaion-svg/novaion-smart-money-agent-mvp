@@ -14,6 +14,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import "./styles.css";
+import V3Dashboard from "./V3Dashboard";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -36,6 +37,7 @@ function apiClient(token) {
     login: (email, password) => request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
     me: () => request("/api/auth/me"),
     summary: () => request("/api/dashboard/summary"),
+    v3Dashboard: () => request("/api/v3/dashboard"),
     wallets: () => request("/api/wallets"),
     walletMetrics: () => request("/api/market-data/wallet-metrics"),
     walletMarketData: (id) => request(`/api/market-data/wallets/${id}`),
@@ -828,7 +830,7 @@ function App() {
 
   if (!token) return <LoginPage onLogin={onLogin} />;
 
-  let page = <DashboardPage api={api} />;
+  let page = <V3Dashboard api={api} legacy={<DashboardPage api={api} />} />;
   if (activePage === "wallets") {
     page = selectedWallet ? (
       <WalletDetailPage wallet={selectedWallet} api={api} back={() => setSelectedWallet(null)} />

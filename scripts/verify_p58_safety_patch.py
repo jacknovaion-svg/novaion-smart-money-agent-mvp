@@ -81,7 +81,7 @@ def _verify_seed_audit():
     cmd = [
         sys.executable,
         str(ROOT / "scripts" / "fetch_seeds.py"),
-        "--hyperliquid-leaderboard-url",
+        "--freedomcore-url",
         "http://127.0.0.1:1/not-running",
         "--source-file",
         str(source),
@@ -93,9 +93,12 @@ def _verify_seed_audit():
         str(output),
         "--report",
         str(report),
+        "--json-report",
+        str(tmp / "fetch_seeds_report.json"),
     ]
     env = os.environ.copy()
     env.pop("NANSEN_API_KEY", None)
+    env.pop("APIFY_TOKEN", None)
     completed = subprocess.run(cmd, cwd=ROOT, env=env, check=False, capture_output=True, text=True)
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
@@ -105,7 +108,7 @@ def _verify_seed_audit():
     assert payload["duplicate_count"] == 1, payload
     assert payload["inserted_count"] == 2, payload
     text = report.read_text(encoding="utf-8")
-    assert "found_count" in text and "duplicate_count" in text and "warnings" or "Warnings" in text
+    assert "found_count" in text and "duplicate_count" in text and ("warnings" in text or "Warnings" in text)
     return {key: payload[key] for key in ["found_count", "valid_count", "invalid_count", "duplicate_count", "inserted_count"]}
 
 

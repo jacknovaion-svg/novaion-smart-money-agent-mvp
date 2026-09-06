@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import auth, dashboard, discovery, market_data, quality, signals, system, v2_validation, validation, wallets
+from app.api import auth, dashboard, discovery, market_data, quality, signals, system, v2_validation, v3, validation, wallets
 
 
 api_router = APIRouter(prefix="/api")
@@ -14,3 +14,4 @@ api_router.include_router(discovery.router)
 api_router.include_router(system.router)
 api_router.include_router(validation.router)
 api_router.include_router(v2_validation.router)
+api_router.include_router(v3.router)

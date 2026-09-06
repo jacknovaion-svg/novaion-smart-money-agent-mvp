@@ -19,6 +19,8 @@ from app.services.system_log_service import write_log
 
 def send_signal_notification(db: Session, signal: Signal, wallet: Wallet) -> bool:
     settings = get_settings()
+    if settings.v3_enabled:
+        return False  # V3's independent post-commit outbox owns high-value signal delivery.
     if settings.smart_money_telegram_boss_mode:
         flush_signal_aggregation_notifications(db)
         return _send_boss_signal_notification(db, signal, wallet)
@@ -64,6 +66,8 @@ def send_signal_notification(db: Session, signal: Signal, wallet: Wallet) -> boo
 
 def flush_signal_aggregation_notifications(db: Session, *, now: datetime | None = None) -> int:
     settings = get_settings()
+    if settings.v3_enabled:
+        return 0
     if not settings.smart_money_telegram_boss_mode:
         return 0
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
@@ -296,6 +300,14 @@ def _format_aggregation_message(db: Session, signals: list[Signal], wallet: Wall
 
 
 def send_daily_report_notification(db: Session, report) -> bool:
+    if get_settings().v3_enabled:
+        from app.services.v3_runtime import daily_notification
+        try:
+            return daily_notification(db)
+        except Exception as exc:
+            db.rollback()
+            write_log(db, level="warning", module="v3_telegram", message="V3 daily notification unavailable", payload={"exception": type(exc).__name__})
+            return False
     settings = get_settings()
     if settings.smart_money_telegram_boss_mode:
         flush_signal_aggregation_notifications(db)
